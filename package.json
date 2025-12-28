@@ -1,0 +1,41 @@
+{
+  "name": "rev-cli",
+  "version": "0.1.0",
+  "description": "Revision workflow for Word ↔ Markdown round-trips",
+  "type": "module",
+  "bin": {
+    "rev": "./bin/rev.js"
+  },
+  "scripts": {
+    "build": "echo 'No build needed'",
+    "test": "node bin/rev.js --help"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gcol33/rev.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gcol33/rev/issues"
+  },
+  "homepage": "https://github.com/gcol33/rev#readme",
+  "keywords": [
+    "markdown",
+    "word",
+    "docx",
+    "track-changes",
+    "comments",
+    "academic",
+    "writing",
+    "pandoc",
+    "criticmarkup"
+  ],
+  "author": "Gilles Colling",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "diff": "^8.0.2",
+    "js-yaml": "^4.1.1",
+    "mammoth": "^1.6.0"
+  }
+}
