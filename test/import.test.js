@@ -290,6 +290,108 @@ test('Comment anchor with special characters', () => {
 });
 
 // ============================================================================
+// CONTEXT-BASED COMMENT PLACEMENT TESTS
+// ============================================================================
+
+console.log('\n🎯 Context-Based Comment Placement Tests\n');
+
+test('Context helps disambiguate duplicate anchors', () => {
+  const markdown = 'The species showed high diversity. Later, another species showed low diversity.';
+  const comments = [{ id: '1', author: 'Reviewer', text: 'Which species?' }];
+  // Anchor "species" appears twice, context "low diversity" indicates second occurrence
+  const anchors = new Map([['1', { anchor: 'species', before: 'another', after: 'showed low diversity' }]]);
+
+  const result = insertCommentsIntoMarkdown(markdown, comments, anchors);
+  // Comment should be after the second "species"
+  const secondSpeciesPos = result.indexOf('species', result.indexOf('species') + 1);
+  const commentPos = result.indexOf('{>>');
+  assert.ok(commentPos > secondSpeciesPos, 'Comment should be after second species (based on context)');
+});
+
+test('Multiple duplicate anchors with different contexts', () => {
+  const markdown = 'Results were significant in study A. Methods were significant in study B. Discussion was significant in study C.';
+  const comments = [
+    { id: '1', author: 'R1', text: 'Comment on B' },
+    { id: '2', author: 'R2', text: 'Comment on C' },
+  ];
+  const anchors = new Map([
+    ['1', { anchor: 'significant', before: 'Methods were', after: 'in study B' }],
+    ['2', { anchor: 'significant', before: 'Discussion was', after: 'in study C' }],
+  ]);
+
+  const result = insertCommentsIntoMarkdown(markdown, comments, anchors);
+  assertContains(result, '{>>R1: Comment on B<<}');
+  assertContains(result, '{>>R2: Comment on C<<}');
+
+  // Verify order: R1 should appear before R2
+  const r1Pos = result.indexOf('{>>R1');
+  const r2Pos = result.indexOf('{>>R2');
+  assert.ok(r1Pos < r2Pos, 'R1 comment should be before R2 comment');
+});
+
+test('Tie-break uses document order when context is equal', () => {
+  const markdown = 'The data shows X. The data shows Y. The data shows Z.';
+  const comments = [
+    { id: '1', author: 'R1', text: 'First' },
+    { id: '2', author: 'R2', text: 'Second' },
+  ];
+  // Both have same anchor with no distinguishing context
+  const anchors = new Map([
+    ['1', { anchor: 'data', before: '', after: '' }],
+    ['2', { anchor: 'data', before: '', after: '' }],
+  ]);
+
+  const result = insertCommentsIntoMarkdown(markdown, comments, anchors);
+  assertContains(result, '{>>R1: First<<}');
+  assertContains(result, '{>>R2: Second<<}');
+
+  // Tie-break should assign first comment to first occurrence, second to second
+  const r1Pos = result.indexOf('{>>R1');
+  const r2Pos = result.indexOf('{>>R2');
+  assert.ok(r1Pos < r2Pos, 'With tie-break, R1 should use first occurrence, R2 should use second');
+});
+
+test('Legacy string anchors still work (backwards compatibility)', () => {
+  const markdown = 'Legacy format still works fine.';
+  const comments = [{ id: '1', author: 'Reviewer', text: 'Good' }];
+  // Old format: just a string, not {anchor, before, after}
+  const anchors = new Map([['1', 'works']]);
+
+  const result = insertCommentsIntoMarkdown(markdown, comments, anchors);
+  assertContains(result, '{>>Reviewer: Good<<}');
+});
+
+test('Used positions not reused in tie-breaks', () => {
+  // Three identical anchors, three comments - each should get unique position
+  const markdown = 'Test word here. Another word there. Final word end.';
+  const comments = [
+    { id: '1', author: 'A', text: 'C1' },
+    { id: '2', author: 'B', text: 'C2' },
+    { id: '3', author: 'C', text: 'C3' },
+  ];
+  const anchors = new Map([
+    ['1', { anchor: 'word', before: '', after: '' }],
+    ['2', { anchor: 'word', before: '', after: '' }],
+    ['3', { anchor: 'word', before: '', after: '' }],
+  ]);
+
+  const result = insertCommentsIntoMarkdown(markdown, comments, anchors);
+
+  // All three comments should appear
+  assertContains(result, '{>>A: C1<<}');
+  assertContains(result, '{>>B: C2<<}');
+  assertContains(result, '{>>C: C3<<}');
+
+  // Count occurrences of each comment - each should appear exactly once
+  const c1Count = (result.match(/\{>>A: C1<<\}/g) || []).length;
+  const c2Count = (result.match(/\{>>B: C2<<\}/g) || []).length;
+  const c3Count = (result.match(/\{>>C: C3<<\}/g) || []).length;
+  assertEqual(c1Count, 1, 'C1 should appear exactly once');
+  assertEqual(c2Count, 1, 'C2 should appear exactly once');
+  assertEqual(c3Count, 1, 'C3 should appear exactly once');
+});
+
+// ============================================================================
 // CLEANUP ANNOTATION TESTS
 // ============================================================================
 
