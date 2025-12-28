@@ -1,5 +1,8 @@
 # rev
 
+![Stability: Experimental](https://img.shields.io/badge/stability-experimental-orange.svg)
+![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)
+
 CLI tool for Word ↔ Markdown round-trips. Handle reviewer feedback on academic papers: import track changes, review interactively, manage comments, and auto-convert figure/table references.
 
 ## Features
