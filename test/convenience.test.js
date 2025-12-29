@@ -8,9 +8,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let tempDir;
-const revPath = path.resolve(import.meta.dirname, '../bin/rev.js');
+const revPath = path.resolve(__dirname, '../bin/rev.js');
 
 beforeEach(() => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'docrev-conv-'));
