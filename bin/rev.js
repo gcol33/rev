@@ -1568,6 +1568,11 @@ program
       config.docx.toc = true;
     }
 
+    // For --dual mode, the clean DOCX should have no comments
+    if (options.dual) {
+      config.docx.keepComments = false;
+    }
+
     // Handle --show-changes mode (audit export)
     if (options.showChanges) {
       if (!targetFormats.includes('docx') && !targetFormats.includes('all')) {
