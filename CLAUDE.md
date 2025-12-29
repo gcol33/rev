@@ -4,7 +4,7 @@ This is `docrev` (command: `rev`), a CLI tool for academic paper workflows with 
 
 ## Project Overview
 
-- **Version**: 0.5.1
+- **Version**: 0.5.2
 - **Node.js**: >=18.0.0
 - **Test coverage**: 508 tests across 23 modules
 - **TypeScript**: Full type definitions in `types/index.d.ts`

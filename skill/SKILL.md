@@ -134,4 +134,20 @@ my-paper/
 4. **Validation phase**: Run `rev check` before submission (lint + grammar + citations)
 5. **Response letter**: Use `rev response` to generate point-by-point responses
 
+## Critical: Ask Questions When Unsure
+
+When addressing reviewer comments or editing scientific papers:
+
+- **Never guess methods or numbers** - If a comment asks for clarification about methodology, sample sizes, statistical parameters, dates, or any quantitative information, ASK the user rather than inventing values
+- **Placeholders are acceptable** - Use `[???]` or `[TODO: specify X]` when information is missing rather than fabricating data
+- **Search online for references** - When comments request citations, use web search to find appropriate references rather than guessing
+- **Clarify ambiguous requests** - If a reviewer comment could be interpreted multiple ways, ask the user which interpretation they prefer
+- **Verify existing values** - When editing numbers that already exist in the document, confirm changes with the user if there's any doubt
+
+Example scenarios requiring user input:
+- "Add a reference for this claim" → Search online OR ask user for specific citation
+- "Clarify the sample size" → Ask user for the correct number
+- "Specify the statistical test used" → Ask user which test was actually used
+- "Add the date of data collection" → Ask user for the actual date
+
 For complete command reference, see [REFERENCE.md](REFERENCE.md).
