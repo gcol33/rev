@@ -4,7 +4,7 @@ This is `docrev` (command: `rev`), a CLI tool for academic paper workflows with 
 
 ## Project Overview
 
-- **Version**: 0.3.2
+- **Version**: 0.4.0
 - **Node.js**: >=18.0.0
 - **Test coverage**: 475 tests across 21 modules
 - **TypeScript**: Full type definitions in `types/index.d.ts`
@@ -216,6 +216,16 @@ Enable tab completion:
 eval "$(rev completions bash)"  # Bash
 eval "$(rev completions zsh)"   # Zsh
 ```
+
+## Claude Code Skill
+
+Install the docrev skill for Claude Code:
+```bash
+rev install-cli-skill    # Install skill to ~/.claude/skills/docrev
+rev uninstall-cli-skill  # Remove the skill
+```
+
+The skill teaches Claude Code how to use rev for academic paper workflows.
 
 ## Known Limitations
 

@@ -4475,4 +4475,314 @@ program
     }
   });
 
+// ============================================================================
+// CLEAN command - Remove generated files
+// ============================================================================
+
+program
+  .command('clean')
+  .description('Remove generated files (paper.md, PDFs, DOCXs)')
+  .option('-n, --dry-run', 'Show what would be deleted without deleting')
+  .option('--all', 'Also remove backup and export zips')
+  .action((options) => {
+    let config = {};
+    try {
+      config = loadBuildConfig() || {};
+    } catch {
+      // Not in a rev project, that's ok
+    }
+
+    const projectName = config.title?.toLowerCase().replace(/\s+/g, '-') || 'paper';
+
+    // Files to clean
+    const patterns = [
+      'paper.md',
+      '*.pdf',
+      `${projectName}.docx`,
+      `${projectName}.pdf`,
+      `${projectName}.tex`,
+      '.paper-*.md', // Temp build files
+    ];
+
+    if (options.all) {
+      patterns.push('*.zip', 'backup-*.zip', '*-export.zip');
+    }
+
+    const toDelete = [];
+
+    for (const pattern of patterns) {
+      if (pattern.includes('*')) {
+        // Glob pattern
+        const regex = new RegExp('^' + pattern.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$');
+        const files = fs.readdirSync('.').filter(f => regex.test(f));
+        toDelete.push(...files);
+      } else if (fs.existsSync(pattern)) {
+        toDelete.push(pattern);
+      }
+    }
+
+    if (toDelete.length === 0) {
+      console.log(chalk.dim('No generated files to clean.'));
+      return;
+    }
+
+    console.log(fmt.header('Clean'));
+    console.log();
+
+    for (const file of toDelete) {
+      if (options.dryRun) {
+        console.log(chalk.dim(`  Would delete: ${file}`));
+      } else {
+        fs.unlinkSync(file);
+        console.log(chalk.red(`  Deleted: ${file}`));
+      }
+    }
+
+    console.log();
+    if (options.dryRun) {
+      console.log(chalk.dim(`Would delete ${toDelete.length} file(s). Run without --dry-run to delete.`));
+    } else {
+      console.log(fmt.status('success', `Cleaned ${toDelete.length} file(s)`));
+    }
+  });
+
+// ============================================================================
+// CHECK command - Pre-submission check (lint + grammar + citations)
+// ============================================================================
+
+program
+  .command('check')
+  .description('Run all checks before submission (lint + grammar + citations)')
+  .option('--fix', 'Auto-fix issues where possible')
+  .option('-s, --severity <level>', 'Minimum grammar severity', 'warning')
+  .action(async (options) => {
+    console.log(fmt.header('Pre-Submission Check'));
+    console.log();
+
+    let hasErrors = false;
+    let totalIssues = 0;
+
+    // 1. Run lint
+    console.log(chalk.cyan.bold('1. Linting...'));
+    let config = {};
+    try {
+      config = loadBuildConfig() || {};
+    } catch {
+      // Not in a rev project
+    }
+
+    let sections = config.sections || [];
+    if (sections.length === 0) {
+      sections = fs.readdirSync('.').filter(f =>
+        f.endsWith('.md') && !['README.md', 'CLAUDE.md', 'paper.md'].includes(f)
+      );
+    }
+
+    const lintIssues = [];
+    const lintWarnings = [];
+
+    for (const file of sections) {
+      if (!fs.existsSync(file)) continue;
+      const content = fs.readFileSync(file, 'utf-8');
+
+      // Check for broken cross-references
+      const refs = content.match(/@(fig|tbl|eq|sec):\w+/g) || [];
+      const anchors = content.match(/\{#(fig|tbl|eq|sec):[^}]+\}/g) || [];
+      const anchorLabels = anchors.map(a => a.match(/#([^}]+)/)[1]);
+
+      for (const ref of refs) {
+        const label = ref.slice(1);
+        if (!anchorLabels.includes(label)) {
+          lintIssues.push({ file, message: `Broken reference: ${ref}` });
+        }
+      }
+
+      // Check for unresolved comments
+      const unresolvedComments = (content.match(/\{>>[^<]*<<\}/g) || [])
+        .filter(c => !c.includes('[RESOLVED]'));
+      if (unresolvedComments.length > 0) {
+        lintWarnings.push({ file, message: `${unresolvedComments.length} unresolved comment(s)` });
+      }
+    }
+
+    if (lintIssues.length > 0) {
+      for (const issue of lintIssues) {
+        console.log(chalk.red(`   ✗ ${issue.file}: ${issue.message}`));
+      }
+      hasErrors = true;
+      totalIssues += lintIssues.length;
+    }
+    for (const warning of lintWarnings) {
+      console.log(chalk.yellow(`   ⚠ ${warning.file}: ${warning.message}`));
+      totalIssues++;
+    }
+    if (lintIssues.length === 0 && lintWarnings.length === 0) {
+      console.log(chalk.green('   ✓ No lint issues'));
+    }
+    console.log();
+
+    // 2. Run grammar check
+    console.log(chalk.cyan.bold('2. Grammar check...'));
+    const {
+      checkGrammar,
+      getGrammarSummary,
+    } = await import('../lib/grammar.js');
+
+    const severityLevels = { error: 3, warning: 2, info: 1 };
+    const minSeverity = severityLevels[options.severity] || 2;
+    let grammarIssues = [];
+
+    for (const file of sections) {
+      if (!fs.existsSync(file)) continue;
+      const text = fs.readFileSync(file, 'utf-8');
+      const issues = checkGrammar(text, { scientific: true });
+      const filtered = issues.filter(i => severityLevels[i.severity] >= minSeverity);
+      grammarIssues.push(...filtered.map(i => ({ ...i, file })));
+    }
+
+    const grammarSummary = getGrammarSummary(grammarIssues);
+    if (grammarSummary.errors > 0) {
+      hasErrors = true;
+    }
+    totalIssues += grammarSummary.total;
+
+    if (grammarSummary.total > 0) {
+      console.log(chalk.yellow(`   ⚠ ${grammarSummary.total} grammar issue(s): ${grammarSummary.errors} errors, ${grammarSummary.warnings} warnings`));
+    } else {
+      console.log(chalk.green('   ✓ No grammar issues'));
+    }
+    console.log();
+
+    // 3. Run citation check
+    console.log(chalk.cyan.bold('3. Citation check...'));
+    const bibFile = config.bibliography || 'references.bib';
+    if (fs.existsSync(bibFile)) {
+      const { validateCitations } = await import('../lib/citations.js');
+      const allContent = sections
+        .filter(f => fs.existsSync(f))
+        .map(f => fs.readFileSync(f, 'utf-8'))
+        .join('\n');
+      const bibContent = fs.readFileSync(bibFile, 'utf-8');
+
+      const result = validateCitations(allContent, bibContent);
+
+      if (result.missing.length > 0) {
+        console.log(chalk.red(`   ✗ ${result.missing.length} missing citation(s): ${result.missing.slice(0, 3).join(', ')}${result.missing.length > 3 ? '...' : ''}`));
+        hasErrors = true;
+        totalIssues += result.missing.length;
+      }
+      if (result.unused.length > 0) {
+        console.log(chalk.yellow(`   ⚠ ${result.unused.length} unused citation(s)`));
+        totalIssues += result.unused.length;
+      }
+      if (result.missing.length === 0 && result.unused.length === 0) {
+        console.log(chalk.green('   ✓ All citations valid'));
+      }
+    } else {
+      console.log(chalk.dim('   - No bibliography file found'));
+    }
+    console.log();
+
+    // Summary
+    console.log(chalk.bold('Summary'));
+    if (hasErrors) {
+      console.log(chalk.red(`   ${totalIssues} issue(s) found. Please fix before submission.`));
+      process.exit(1);
+    } else if (totalIssues > 0) {
+      console.log(chalk.yellow(`   ${totalIssues} warning(s). Review before submission.`));
+    } else {
+      console.log(chalk.green('   ✓ All checks passed! Ready for submission.'));
+    }
+  });
+
+// ============================================================================
+// OPEN command - Open project folder or file
+// ============================================================================
+
+program
+  .command('open')
+  .description('Open project folder or file in default app')
+  .argument('[file]', 'File to open (default: project folder)')
+  .action(async (file) => {
+    const { exec } = await import('child_process');
+    const target = file || '.';
+
+    if (!fs.existsSync(target)) {
+      console.error(chalk.red(`File not found: ${target}`));
+      process.exit(1);
+    }
+
+    // Platform-specific open command
+    const platform = process.platform;
+    let command;
+
+    if (platform === 'darwin') {
+      command = `open "${target}"`;
+    } else if (platform === 'win32') {
+      command = `start "" "${target}"`;
+    } else {
+      command = `xdg-open "${target}"`;
+    }
+
+    exec(command, (err) => {
+      if (err) {
+        console.error(chalk.red(`Failed to open: ${err.message}`));
+        process.exit(1);
+      }
+      console.log(fmt.status('success', `Opened ${target}`));
+    });
+  });
+
+// ============================================================================
+// INSTALL-CLI-SKILL command - Install Claude Code skill
+// ============================================================================
+
+program
+  .command('install-cli-skill')
+  .description('Install docrev skill for Claude Code')
+  .action(() => {
+    const homedir = process.env.HOME || process.env.USERPROFILE;
+    const skillDir = path.join(homedir, '.claude', 'skills', 'docrev');
+    const sourceDir = path.join(import.meta.dirname, '..', 'skill');
+
+    // Check if source skill files exist
+    const skillFile = path.join(sourceDir, 'SKILL.md');
+    if (!fs.existsSync(skillFile)) {
+      console.error(chalk.red('Skill files not found in package'));
+      process.exit(1);
+    }
+
+    // Create skill directory
+    fs.mkdirSync(skillDir, { recursive: true });
+
+    // Copy skill files
+    const files = ['SKILL.md', 'REFERENCE.md'];
+    for (const file of files) {
+      const src = path.join(sourceDir, file);
+      const dest = path.join(skillDir, file);
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, dest);
+      }
+    }
+
+    console.log(fmt.status('success', 'Installed docrev skill for Claude Code'));
+    console.log(chalk.dim(`  Location: ${skillDir}`));
+    console.log(chalk.dim('  Restart Claude Code to activate'));
+  });
+
+program
+  .command('uninstall-cli-skill')
+  .description('Remove docrev skill from Claude Code')
+  .action(() => {
+    const homedir = process.env.HOME || process.env.USERPROFILE;
+    const skillDir = path.join(homedir, '.claude', 'skills', 'docrev');
+
+    if (fs.existsSync(skillDir)) {
+      fs.rmSync(skillDir, { recursive: true });
+      console.log(fmt.status('success', 'Removed docrev skill from Claude Code'));
+    } else {
+      console.log(chalk.yellow('Skill not installed'));
+    }
+  });
+
 program.parse();
