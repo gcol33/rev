@@ -1,6 +1,6 @@
 {
   "name": "docrev",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Academic paper revision workflow: Word ↔ Markdown round-trips, DOI validation, reviewer comments",
   "type": "module",
   "bin": {
@@ -8,7 +8,8 @@
   },
   "scripts": {
     "build": "echo 'No build needed'",
-    "test": "node bin/rev.js --help"
+    "test": "node --test test/*.test.js",
+    "test:watch": "node --test --watch test/*.test.js"
   },
   "repository": {
     "type": "git",

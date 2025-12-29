@@ -1049,6 +1049,148 @@ program
   });
 
 // ============================================================================
+// MERGE command - Combine feedback from multiple reviewers
+// ============================================================================
+
+program
+  .command('merge')
+  .description('Merge feedback from multiple Word documents')
+  .argument('<original>', 'Original markdown file')
+  .argument('<docx...>', 'Word documents from reviewers')
+  .option('-o, --output <file>', 'Output file (default: original-merged.md)')
+  .option('--names <names>', 'Reviewer names (comma-separated, in order of docx files)')
+  .option('--auto', 'Auto-resolve conflicts by taking first change')
+  .option('--dry-run', 'Show conflicts without writing')
+  .action(async (original, docxFiles, options) => {
+    const { mergeReviewerDocs, formatConflict, applyChangesAsAnnotations, resolveConflict } = await import('../lib/merge.js');
+
+    if (!fs.existsSync(original)) {
+      console.error(fmt.status('error', `Original file not found: ${original}`));
+      process.exit(1);
+    }
+
+    // Validate all docx files exist
+    for (const docx of docxFiles) {
+      if (!fs.existsSync(docx)) {
+        console.error(fmt.status('error', `Reviewer file not found: ${docx}`));
+        process.exit(1);
+      }
+    }
+
+    // Parse reviewer names
+    const names = options.names
+      ? options.names.split(',').map(n => n.trim())
+      : docxFiles.map((f, i) => `Reviewer ${i + 1}`);
+
+    if (names.length < docxFiles.length) {
+      // Pad with default names
+      for (let i = names.length; i < docxFiles.length; i++) {
+        names.push(`Reviewer ${i + 1}`);
+      }
+    }
+
+    const reviewerDocs = docxFiles.map((p, i) => ({
+      path: p,
+      name: names[i],
+    }));
+
+    console.log(fmt.header('Multi-Reviewer Merge'));
+    console.log();
+    console.log(chalk.dim(`  Original: ${original}`));
+    console.log(chalk.dim(`  Reviewers: ${names.join(', ')}`));
+    console.log();
+
+    const spin = fmt.spinner('Analyzing changes...').start();
+
+    try {
+      const { merged, conflicts, stats, originalText } = await mergeReviewerDocs(original, reviewerDocs, {
+        autoResolve: options.auto,
+      });
+
+      spin.stop();
+
+      // Show stats
+      console.log(fmt.table(['Metric', 'Count'], [
+        ['Total changes', stats.totalChanges.toString()],
+        ['Non-conflicting', stats.nonConflicting.toString()],
+        ['Conflicts', stats.conflicts.toString()],
+        ['Comments', stats.comments.toString()],
+      ]));
+      console.log();
+
+      // Handle conflicts
+      if (conflicts.length > 0) {
+        console.log(chalk.yellow(`Found ${conflicts.length} conflict(s):\n`));
+
+        let resolvedMerged = merged;
+
+        for (let i = 0; i < conflicts.length; i++) {
+          const conflict = conflicts[i];
+          console.log(chalk.bold(`Conflict ${i + 1}/${conflicts.length}:`));
+          console.log(formatConflict(conflict, originalText));
+          console.log();
+
+          if (options.auto) {
+            // Auto-resolve: take first reviewer's change
+            console.log(chalk.dim(`  Auto-resolved: using ${conflict.changes[0].reviewer}'s change`));
+            resolvedMerged = resolveConflict(resolvedMerged, conflict, 0, originalText);
+          } else if (!options.dryRun) {
+            // Interactive resolution
+            const rl = await import('readline');
+            const readline = rl.createInterface({
+              input: process.stdin,
+              output: process.stdout,
+            });
+
+            const answer = await new Promise((resolve) =>
+              readline.question(chalk.cyan(`  Choose (1-${conflict.changes.length}, s=skip): `), resolve)
+            );
+            readline.close();
+
+            if (answer.toLowerCase() !== 's' && !isNaN(parseInt(answer))) {
+              const choice = parseInt(answer) - 1;
+              if (choice >= 0 && choice < conflict.changes.length) {
+                resolvedMerged = resolveConflict(resolvedMerged, conflict, choice, originalText);
+                console.log(chalk.green(`  Applied: ${conflict.changes[choice].reviewer}'s change`));
+              }
+            } else {
+              console.log(chalk.dim('  Skipped'));
+            }
+            console.log();
+          }
+        }
+
+        if (!options.dryRun) {
+          const outPath = options.output || original.replace(/\.md$/, '-merged.md');
+          fs.writeFileSync(outPath, resolvedMerged, 'utf-8');
+          console.log(fmt.status('success', `Merged output written to ${outPath}`));
+        }
+      } else {
+        // No conflicts
+        if (!options.dryRun) {
+          const outPath = options.output || original.replace(/\.md$/, '-merged.md');
+          fs.writeFileSync(outPath, merged, 'utf-8');
+          console.log(fmt.status('success', `Merged output written to ${outPath}`));
+        } else {
+          console.log(fmt.status('info', 'Dry run - no output written'));
+        }
+      }
+
+      if (!options.dryRun && stats.nonConflicting > 0) {
+        console.log();
+        console.log(chalk.dim('Next steps:'));
+        console.log(chalk.dim('  1. rev review <merged.md>  - Review all changes'));
+        console.log(chalk.dim('  2. rev comments <merged.md> - Address comments'));
+      }
+    } catch (err) {
+      spin.stop();
+      console.error(fmt.status('error', err.message));
+      if (process.env.DEBUG) console.error(err.stack);
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
 // REFS command - Show figure/table reference status
 // ============================================================================
 
@@ -1381,6 +1523,7 @@ program
   .option('-d, --dir <directory>', 'Project directory', '.')
   .option('--no-crossref', 'Skip pandoc-crossref filter')
   .option('--toc', 'Include table of contents')
+  .option('--show-changes', 'Export DOCX with visible track changes (audit mode)')
   .action(async (formats, options) => {
     const dir = path.resolve(options.dir);
 
@@ -1414,12 +1557,64 @@ program
     console.log(chalk.dim(`  Formats: ${targetFormats.join(', ')}`));
     console.log(chalk.dim(`  Crossref: ${hasPandocCrossref() && options.crossref !== false ? 'enabled' : 'disabled'}`));
     if (tocEnabled) console.log(chalk.dim(`  TOC: enabled`));
+    if (options.showChanges) console.log(chalk.dim(`  Track changes: visible`));
     console.log('');
 
     // Override config with CLI options
     if (options.toc) {
       config.pdf.toc = true;
       config.docx.toc = true;
+    }
+
+    // Handle --show-changes mode (audit export)
+    if (options.showChanges) {
+      if (!targetFormats.includes('docx') && !targetFormats.includes('all')) {
+        console.error(fmt.status('error', '--show-changes only applies to DOCX output'));
+        process.exit(1);
+      }
+
+      const { combineSections } = await import('../lib/build.js');
+      const { buildWithTrackChanges } = await import('../lib/trackchanges.js');
+
+      const spin = fmt.spinner('Building with track changes...').start();
+
+      try {
+        // Combine sections first
+        const paperPath = combineSections(dir, config);
+        spin.stop();
+        console.log(chalk.cyan('Combined sections → paper.md'));
+        console.log(chalk.dim(`  ${paperPath}\n`));
+
+        // Build DOCX with track changes
+        const baseName = config.title
+          ? config.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50)
+          : 'paper';
+        const outputPath = path.join(dir, `${baseName}-changes.docx`);
+
+        const spinTc = fmt.spinner('Applying track changes...').start();
+        const result = await buildWithTrackChanges(paperPath, outputPath, {
+          author: getUserName() || 'Author',
+        });
+        spinTc.stop();
+
+        if (result.success) {
+          console.log(chalk.cyan('Output (with track changes):'));
+          console.log(`  DOCX: ${path.basename(outputPath)}`);
+          if (result.stats) {
+            console.log(chalk.dim(`    ${result.stats.insertions} insertions, ${result.stats.deletions} deletions, ${result.stats.substitutions} substitutions`));
+          }
+          console.log(chalk.green('\nBuild complete!'));
+        } else {
+          console.error(fmt.status('error', result.message));
+          process.exit(1);
+        }
+      } catch (err) {
+        spin.stop();
+        console.error(fmt.status('error', err.message));
+        if (process.env.DEBUG) console.error(err.stack);
+        process.exit(1);
+      }
+      return;
     }
 
     const spin = fmt.spinner('Building...').start();
@@ -1724,6 +1919,103 @@ program
     console.log(fmt.table(['Reviewer', 'Comments'], rows));
     console.log();
     console.log(fmt.status('success', `Created ${outputPath}`));
+  });
+
+// ============================================================================
+// VALIDATE command - Check manuscript against journal requirements
+// ============================================================================
+
+program
+  .command('validate')
+  .description('Validate manuscript against journal requirements')
+  .argument('[files...]', 'Markdown files to validate (default: all section files)')
+  .option('-j, --journal <name>', 'Journal profile (e.g., nature, plos-one, science)')
+  .option('--list', 'List available journal profiles')
+  .action(async (files, options) => {
+    const { listJournals, validateProject, getJournalProfile } = await import('../lib/journals.js');
+
+    if (options.list) {
+      console.log(fmt.header('Available Journal Profiles'));
+      console.log();
+      const journals = listJournals();
+      for (const j of journals) {
+        console.log(`  ${chalk.bold(j.id)} - ${j.name}`);
+        console.log(chalk.dim(`    ${j.url}`));
+      }
+      console.log();
+      console.log(chalk.dim('Usage: rev validate --journal <name>'));
+      return;
+    }
+
+    if (!options.journal) {
+      console.error(fmt.status('error', 'Please specify a journal with --journal <name>'));
+      console.error(chalk.dim('Use --list to see available profiles'));
+      process.exit(1);
+    }
+
+    const profile = getJournalProfile(options.journal);
+    if (!profile) {
+      console.error(fmt.status('error', `Unknown journal: ${options.journal}`));
+      console.error(chalk.dim('Use --list to see available profiles'));
+      process.exit(1);
+    }
+
+    // Find files to validate
+    let mdFiles = files;
+    if (!mdFiles || mdFiles.length === 0) {
+      mdFiles = fs.readdirSync('.').filter(f =>
+        f.endsWith('.md') && !['README.md', 'CLAUDE.md', 'paper.md'].includes(f)
+      );
+    }
+
+    if (mdFiles.length === 0) {
+      console.error(fmt.status('error', 'No markdown files found'));
+      process.exit(1);
+    }
+
+    console.log(fmt.header(`Validating for ${profile.name}`));
+    console.log(chalk.dim(`  ${profile.url}`));
+    console.log();
+
+    const result = validateProject(mdFiles, options.journal);
+
+    // Show stats
+    console.log(chalk.cyan('Manuscript Stats:'));
+    console.log(fmt.table(['Metric', 'Value'], [
+      ['Word count', result.stats.wordCount.toString()],
+      ['Abstract', `${result.stats.abstractWords} words`],
+      ['Title', `${result.stats.titleChars} chars`],
+      ['Figures', result.stats.figures.toString()],
+      ['Tables', result.stats.tables.toString()],
+      ['References', result.stats.references.toString()],
+    ]));
+    console.log();
+
+    // Show errors
+    if (result.errors.length > 0) {
+      console.log(chalk.red('Errors:'));
+      for (const err of result.errors) {
+        console.log(chalk.red(`  ✗ ${err}`));
+      }
+      console.log();
+    }
+
+    // Show warnings
+    if (result.warnings.length > 0) {
+      console.log(chalk.yellow('Warnings:'));
+      for (const warn of result.warnings) {
+        console.log(chalk.yellow(`  ⚠ ${warn}`));
+      }
+      console.log();
+    }
+
+    // Summary
+    if (result.valid) {
+      console.log(fmt.status('success', `Manuscript meets ${profile.name} requirements`));
+    } else {
+      console.log(fmt.status('error', `Manuscript has ${result.errors.length} error(s)`));
+      process.exit(1);
+    }
   });
 
 // ============================================================================
@@ -2494,6 +2786,188 @@ program
       console.error(fmt.status('error', `Unknown action: ${action}`));
       console.log(chalk.dim('Actions: check, fetch, add, lookup'));
       process.exit(1);
+    }
+  });
+
+// ============================================================================
+// DIFF command - Compare sections against git history
+// ============================================================================
+
+program
+  .command('diff')
+  .description('Compare sections against git history')
+  .argument('[ref]', 'Git reference to compare against (default: main/master)')
+  .option('-f, --files <files>', 'Specific files to compare (comma-separated)')
+  .option('--stat', 'Show only statistics, not full diff')
+  .action(async (ref, options) => {
+    const {
+      isGitRepo,
+      getDefaultBranch,
+      getCurrentBranch,
+      getChangedFiles,
+      getWordCountDiff,
+      compareFileVersions,
+    } = await import('../lib/git.js');
+
+    if (!isGitRepo()) {
+      console.error(fmt.status('error', 'Not a git repository'));
+      process.exit(1);
+    }
+
+    const compareRef = ref || getDefaultBranch();
+    const currentBranch = getCurrentBranch();
+
+    console.log(fmt.header('Git Diff'));
+    console.log(chalk.dim(`  Comparing: ${compareRef} → ${currentBranch || 'HEAD'}`));
+    console.log();
+
+    // Get files to compare
+    let filesToCompare;
+    if (options.files) {
+      filesToCompare = options.files.split(',').map(f => f.trim());
+    } else {
+      // Default to markdown section files
+      filesToCompare = fs.readdirSync('.').filter(f =>
+        f.endsWith('.md') && !['README.md', 'CLAUDE.md'].includes(f)
+      );
+    }
+
+    if (filesToCompare.length === 0) {
+      console.log(fmt.status('info', 'No markdown files found'));
+      return;
+    }
+
+    // Get changed files from git
+    const changedFiles = getChangedFiles(compareRef);
+    const changedSet = new Set(changedFiles.map(f => f.file));
+
+    // Get word count differences
+    const { total, byFile } = getWordCountDiff(filesToCompare, compareRef);
+
+    // Show results
+    const rows = [];
+    for (const file of filesToCompare) {
+      const stats = byFile[file];
+      if (stats && (stats.added > 0 || stats.removed > 0)) {
+        const status = changedSet.has(file)
+          ? changedFiles.find(f => f.file === file)?.status || 'modified'
+          : 'unchanged';
+        rows.push([
+          file,
+          status,
+          chalk.green(`+${stats.added}`),
+          chalk.red(`-${stats.removed}`),
+        ]);
+      }
+    }
+
+    if (rows.length === 0) {
+      console.log(fmt.status('success', 'No changes detected'));
+      return;
+    }
+
+    console.log(fmt.table(['File', 'Status', 'Added', 'Removed'], rows));
+    console.log();
+    console.log(chalk.dim(`Total: ${chalk.green(`+${total.added}`)} words, ${chalk.red(`-${total.removed}`)} words`));
+
+    // Show detailed diff if not --stat
+    if (!options.stat && rows.length > 0) {
+      console.log();
+      console.log(chalk.cyan('Changed sections:'));
+      for (const file of filesToCompare) {
+        const stats = byFile[file];
+        if (stats && (stats.added > 0 || stats.removed > 0)) {
+          const { changes } = compareFileVersions(file, compareRef);
+          console.log(chalk.bold(`\n  ${file}:`));
+
+          // Show first few significant changes
+          let shown = 0;
+          for (const change of changes) {
+            if (shown >= 3) {
+              console.log(chalk.dim('    ...'));
+              break;
+            }
+            const preview = change.text.slice(0, 60).replace(/\n/g, ' ');
+            if (change.type === 'add') {
+              console.log(chalk.green(`    + "${preview}..."`));
+            } else {
+              console.log(chalk.red(`    - "${preview}..."`));
+            }
+            shown++;
+          }
+        }
+      }
+    }
+  });
+
+// ============================================================================
+// HISTORY command - Show revision history
+// ============================================================================
+
+program
+  .command('history')
+  .description('Show revision history for section files')
+  .argument('[file]', 'Specific file (default: all sections)')
+  .option('-n, --limit <count>', 'Number of commits to show', '10')
+  .action(async (file, options) => {
+    const {
+      isGitRepo,
+      getFileHistory,
+      getRecentCommits,
+      hasUncommittedChanges,
+    } = await import('../lib/git.js');
+
+    if (!isGitRepo()) {
+      console.error(fmt.status('error', 'Not a git repository'));
+      process.exit(1);
+    }
+
+    const limit = parseInt(options.limit) || 10;
+
+    console.log(fmt.header('Revision History'));
+    console.log();
+
+    if (file) {
+      // Show history for specific file
+      if (!fs.existsSync(file)) {
+        console.error(fmt.status('error', `File not found: ${file}`));
+        process.exit(1);
+      }
+
+      const history = getFileHistory(file, limit);
+
+      if (history.length === 0) {
+        console.log(fmt.status('info', 'No history found (file may not be committed)'));
+        return;
+      }
+
+      console.log(chalk.cyan(`History for ${file}:`));
+      console.log();
+
+      for (const commit of history) {
+        const date = new Date(commit.date).toLocaleDateString();
+        console.log(`  ${chalk.yellow(commit.hash)} ${chalk.dim(date)}`);
+        console.log(`    ${commit.message}`);
+      }
+    } else {
+      // Show recent commits affecting any file
+      const commits = getRecentCommits(limit);
+
+      if (commits.length === 0) {
+        console.log(fmt.status('info', 'No commits found'));
+        return;
+      }
+
+      if (hasUncommittedChanges()) {
+        console.log(chalk.yellow('  * Uncommitted changes'));
+        console.log();
+      }
+
+      for (const commit of commits) {
+        const date = new Date(commit.date).toLocaleDateString();
+        console.log(`  ${chalk.yellow(commit.hash)} ${chalk.dim(date)} ${chalk.blue(commit.author)}`);
+        console.log(`    ${commit.message}`);
+      }
     }
   });
 

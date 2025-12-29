@@ -118,6 +118,7 @@ rev build docx
 |---------|-------------|
 | `rev build [formats...]` | Build PDF/DOCX/TEX from sections |
 | `rev build --toc` | Build with table of contents |
+| `rev build --show-changes` | Export DOCX with visible track changes |
 | `rev new <name>` | Create new project from template |
 | `rev new --list` | List available templates |
 | `rev install` | Check/install dependencies (pandoc-crossref) |
@@ -176,6 +177,16 @@ rev build docx
 | `rev equations from-word <docx>` | Extract equations from Word to LaTeX |
 | `rev response [files]` | Generate response letter from comments |
 | `rev anonymize <file>` | Prepare document for blind review |
+| `rev validate --journal <name>` | Check manuscript against journal requirements |
+| `rev validate --list` | List available journal profiles |
+
+### Multi-Reviewer & Git
+
+| Command | Description |
+|---------|-------------|
+| `rev merge <md> <docx...>` | Merge feedback from multiple Word documents |
+| `rev diff [ref]` | Compare sections against git history |
+| `rev history [file]` | Show revision history for sections |
 
 ### Configuration
 
