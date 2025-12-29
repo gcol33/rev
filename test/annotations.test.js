@@ -12,6 +12,7 @@ import {
   applyDecision,
   getTrackChanges,
   setCommentStatus,
+  hasAnnotations,
 } from '../lib/annotations.js';
 
 describe('parseAnnotations', () => {
@@ -327,5 +328,98 @@ describe('getComments edge cases', () => {
     const text = '{>>R1: first<<} {>>R2: second<<} {>>R1: third<<}';
     const comments = getComments(text);
     assert.strictEqual(comments.length, 3);
+  });
+});
+
+describe('nested annotations', () => {
+  it('should strip double-nested deletions', () => {
+    const text = '{--{--text--}--}';
+    const result = stripAnnotations(text);
+    assert.strictEqual(result, '');
+    assert.ok(!result.includes('{--'));
+    assert.ok(!result.includes('--}'));
+  });
+
+  it('should strip triple-nested deletions', () => {
+    const text = '{--{--{--# Abstract--}--}--}';
+    const result = stripAnnotations(text);
+    assert.strictEqual(result, '');
+  });
+
+  it('should strip double-nested insertions', () => {
+    const text = '{++{++text++}++}';
+    const result = stripAnnotations(text);
+    assert.strictEqual(result, 'text');
+  });
+
+  it('should handle mixed nested annotations', () => {
+    const text = '{--{++inserted++}--}';
+    const result = stripAnnotations(text);
+    // Insertion becomes text, then deletion removes it
+    assert.strictEqual(result, '');
+  });
+
+  it('should handle nested substitutions without leaving markers', () => {
+    // Nested substitutions are complex - regex can't perfectly handle them
+    // The key requirement is: no malformed markers left behind
+    const text = '{~~{~~old~>middle~~}~>new~~}';
+    const result = stripAnnotations(text);
+    // Should not contain any annotation markers
+    assert.ok(!result.includes('{~~'), 'Should not contain {~~');
+    assert.ok(!result.includes('~~}'), 'Should not contain ~~}');
+    assert.ok(!result.includes('~>'), 'Should not contain ~>');
+  });
+
+  it('should clean up orphaned markers', () => {
+    const text = 'text --}--} more';
+    const result = stripAnnotations(text);
+    assert.ok(!result.includes('--}--}'));
+  });
+
+  it('should clean up partial opening markers', () => {
+    const text = '{--{-- text';
+    const result = stripAnnotations(text);
+    assert.ok(!result.includes('{--{--'));
+  });
+
+  it('should handle deeply nested real-world case', () => {
+    // This is the pattern that was causing issues in production
+    const text = '{--{--{--# Abstract--}--}--}\n\nBackground: Alien plant species';
+    const result = stripAnnotations(text);
+    assert.strictEqual(result, '\n\nBackground: Alien plant species');
+    assert.ok(!result.includes('{--'));
+    assert.ok(!result.includes('--}'));
+  });
+
+  it('should preserve comments when stripping nested changes', () => {
+    const text = '{--{--deleted--}--} {>>Author: comment<<}';
+    const result = stripAnnotations(text, { keepComments: true });
+    assert.strictEqual(result, ' {>>Author: comment<<}');
+  });
+});
+
+describe('hasAnnotations', () => {
+  it('should return true for text with insertions', () => {
+    assert.strictEqual(hasAnnotations('{++text++}'), true);
+  });
+
+  it('should return true for text with deletions', () => {
+    assert.strictEqual(hasAnnotations('{--text--}'), true);
+  });
+
+  it('should return true for text with substitutions', () => {
+    assert.strictEqual(hasAnnotations('{~~old~>new~~}'), true);
+  });
+
+  it('should return true for text with comments', () => {
+    assert.strictEqual(hasAnnotations('{>>comment<<}'), true);
+  });
+
+  it('should return false for plain text', () => {
+    assert.strictEqual(hasAnnotations('Plain text'), false);
+  });
+
+  it('should return false for empty text', () => {
+    assert.strictEqual(hasAnnotations(''), false);
   });
 });

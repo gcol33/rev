@@ -107,7 +107,8 @@ describe('Workflow: Accept/reject track changes', () => {
     const original = `Text with {++insert++} and {--delete--} and {~~old~>new~~}.`;
     const stripped = stripAnnotations(original);
 
-    assert.strictEqual(stripped, 'Text with insert and  and new.');
+    // Double spaces from deletions are collapsed to single (cleaner output)
+    assert.strictEqual(stripped, 'Text with insert and and new.');
     assert.ok(!stripped.includes('{'));
   });
 });
