@@ -117,6 +117,7 @@ rev build docx
 | Command | Description |
 |---------|-------------|
 | `rev build [formats...]` | Build PDF/DOCX/TEX from sections |
+| `rev build --toc` | Build with table of contents |
 | `rev new <name>` | Create new project from template |
 | `rev new --list` | List available templates |
 | `rev install` | Check/install dependencies (pandoc-crossref) |
@@ -137,6 +138,7 @@ rev build docx
 | `rev review <file>` | Interactive accept/reject TUI for track changes |
 | `rev status <file>` | Show annotation counts |
 | `rev comments <file>` | List all comments with context |
+| `rev comments <file> --export comments.csv` | Export comments to CSV |
 | `rev resolve <file> -n 1` | Mark comment #1 as resolved |
 | `rev strip <file>` | Output clean Markdown (annotations applied) |
 
@@ -173,6 +175,7 @@ rev build docx
 | `rev equations list` | List all equations in section files |
 | `rev equations from-word <docx>` | Extract equations from Word to LaTeX |
 | `rev response [files]` | Generate response letter from comments |
+| `rev anonymize <file>` | Prepare document for blind review |
 
 ### Configuration
 
@@ -229,10 +232,12 @@ pdf:
   fontsize: 12pt
   geometry: margin=1in
   linestretch: 1.5
+  toc: false                 # Table of contents
 
 docx:
   reference: template.docx   # Optional reference doc
   keepComments: true
+  toc: false                 # Table of contents
 ```
 
 ## Annotation Syntax (CriticMarkup)

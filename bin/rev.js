@@ -185,6 +185,7 @@ program
   .argument('<file>', 'Markdown file')
   .option('-p, --pending', 'Show only pending (unresolved) comments')
   .option('-r, --resolved', 'Show only resolved comments')
+  .option('-e, --export <csvFile>', 'Export comments to CSV file')
   .action((file, options) => {
     if (!fs.existsSync(file)) {
       console.error(chalk.red(`Error: File not found: ${file}`));
@@ -196,6 +197,34 @@ program
       pendingOnly: options.pending,
       resolvedOnly: options.resolved,
     });
+
+    // CSV export mode
+    if (options.export) {
+      const csvEscape = (str) => {
+        if (!str) return '';
+        str = String(str);
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return '"' + str.replace(/"/g, '""') + '"';
+        }
+        return str;
+      };
+
+      const header = ['number', 'author', 'comment', 'context', 'status', 'file', 'line'];
+      const rows = comments.map((c, i) => [
+        i + 1,
+        csvEscape(c.author || ''),
+        csvEscape(c.content),
+        csvEscape(c.before ? c.before.trim() : ''),
+        c.resolved ? 'resolved' : 'pending',
+        path.basename(file),
+        c.line,
+      ].join(','));
+
+      const csv = [header.join(','), ...rows].join('\n');
+      fs.writeFileSync(options.export, csv, 'utf-8');
+      console.log(fmt.status('success', `Exported ${comments.length} comments to ${options.export}`));
+      return;
+    }
 
     if (comments.length === 0) {
       if (options.pending) {
@@ -1351,6 +1380,7 @@ program
   .argument('[formats...]', 'Output formats: pdf, docx, tex, all', ['pdf', 'docx'])
   .option('-d, --dir <directory>', 'Project directory', '.')
   .option('--no-crossref', 'Skip pandoc-crossref filter')
+  .option('--toc', 'Include table of contents')
   .action(async (formats, options) => {
     const dir = path.resolve(options.dir);
 
@@ -1380,15 +1410,24 @@ program
 
     // Show what we're building
     const targetFormats = formats.length > 0 ? formats : ['pdf', 'docx'];
+    const tocEnabled = options.toc || config.pdf?.toc || config.docx?.toc;
     console.log(chalk.dim(`  Formats: ${targetFormats.join(', ')}`));
     console.log(chalk.dim(`  Crossref: ${hasPandocCrossref() && options.crossref !== false ? 'enabled' : 'disabled'}`));
+    if (tocEnabled) console.log(chalk.dim(`  TOC: enabled`));
     console.log('');
+
+    // Override config with CLI options
+    if (options.toc) {
+      config.pdf.toc = true;
+      config.docx.toc = true;
+    }
 
     const spin = fmt.spinner('Building...').start();
 
     try {
       const { results, paperPath } = await build(dir, targetFormats, {
         crossref: options.crossref,
+        config, // Pass modified config
       });
 
       spin.stop();
@@ -1685,6 +1724,123 @@ program
     console.log(fmt.table(['Reviewer', 'Comments'], rows));
     console.log();
     console.log(fmt.status('success', `Created ${outputPath}`));
+  });
+
+// ============================================================================
+// ANONYMIZE command - Prepare document for blind review
+// ============================================================================
+
+program
+  .command('anonymize')
+  .description('Prepare document for blind review')
+  .argument('<input>', 'Input markdown file or directory')
+  .option('-o, --output <file>', 'Output file (default: input-anonymous.md)')
+  .option('--authors <names>', 'Author names to redact (comma-separated)')
+  .option('--dry-run', 'Show what would be changed without writing')
+  .action((input, options) => {
+    const isDir = fs.existsSync(input) && fs.statSync(input).isDirectory();
+    const files = isDir
+      ? fs.readdirSync(input)
+          .filter(f => f.endsWith('.md') && !['README.md', 'CLAUDE.md'].includes(f))
+          .map(f => path.join(input, f))
+      : [input];
+
+    if (files.length === 0) {
+      console.error(fmt.status('error', 'No markdown files found'));
+      process.exit(1);
+    }
+
+    // Get author names to redact
+    let authorNames = [];
+    if (options.authors) {
+      authorNames = options.authors.split(',').map(n => n.trim());
+    } else {
+      // Try to load from rev.yaml
+      const configPath = isDir ? path.join(input, 'rev.yaml') : 'rev.yaml';
+      if (fs.existsSync(configPath)) {
+        try {
+          const config = yaml.load(fs.readFileSync(configPath, 'utf-8'));
+          if (config.authors) {
+            authorNames = config.authors.map(a => typeof a === 'string' ? a : a.name).filter(Boolean);
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    console.log(fmt.header('Anonymizing Document'));
+    console.log();
+
+    let totalChanges = 0;
+
+    for (const file of files) {
+      if (!fs.existsSync(file)) {
+        console.error(chalk.yellow(`  Skipping: ${file} (not found)`));
+        continue;
+      }
+
+      let text = fs.readFileSync(file, 'utf-8');
+      let changes = 0;
+
+      // Remove YAML frontmatter author block
+      text = text.replace(/^---\n([\s\S]*?)\n---/, (match, fm) => {
+        let modified = fm;
+        // Remove author/authors field
+        modified = modified.replace(/^author:.*(?:\n(?:  |\t).*)*$/m, '');
+        modified = modified.replace(/^authors:.*(?:\n(?:  |\t|-\s+).*)*$/m, '');
+        // Remove affiliation/email
+        modified = modified.replace(/^affiliation:.*$/m, '');
+        modified = modified.replace(/^email:.*$/m, '');
+        if (modified !== fm) changes++;
+        return '---\n' + modified.replace(/\n{3,}/g, '\n\n').trim() + '\n---';
+      });
+
+      // Remove acknowledgments section
+      const ackPatterns = [
+        /^#+\s*Acknowledgments?[\s\S]*?(?=^#|\Z)/gmi,
+        /^#+\s*Funding[\s\S]*?(?=^#|\Z)/gmi,
+      ];
+      for (const pattern of ackPatterns) {
+        const before = text;
+        text = text.replace(pattern, '');
+        if (text !== before) changes++;
+      }
+
+      // Redact author names
+      for (const name of authorNames) {
+        const namePattern = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+        const before = text;
+        text = text.replace(namePattern, '[AUTHOR]');
+        if (text !== before) changes++;
+      }
+
+      // Replace self-citations: @AuthorLastName2024 -> @AUTHOR2024
+      for (const name of authorNames) {
+        const lastName = name.split(/\s+/).pop();
+        if (lastName && lastName.length > 2) {
+          const citePat = new RegExp(`@${lastName}(\\d{4})`, 'gi');
+          const before = text;
+          text = text.replace(citePat, '@AUTHOR$1');
+          if (text !== before) changes++;
+        }
+      }
+
+      totalChanges += changes;
+
+      if (options.dryRun) {
+        console.log(chalk.dim(`  ${path.basename(file)}: ${changes} change(s)`));
+      } else {
+        const outPath = options.output || file.replace(/\.md$/, '-anonymous.md');
+        fs.writeFileSync(outPath, text, 'utf-8');
+        console.log(fmt.status('success', `${path.basename(file)} → ${path.basename(outPath)} (${changes} changes)`));
+      }
+    }
+
+    console.log();
+    if (options.dryRun) {
+      console.log(chalk.dim(`  Total: ${totalChanges} change(s) would be made`));
+    } else {
+      console.log(fmt.status('success', `Anonymized ${files.length} file(s)`));
+    }
   });
 
 // ============================================================================
