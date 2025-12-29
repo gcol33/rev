@@ -41,9 +41,12 @@ rev install    # Check for missing dependencies
 - **Import from Word** - Diff Word docs against your Markdown, generating CriticMarkup annotations
 - **Section-aware import** - Import directly to modular section files (intro.md, methods.md, etc.)
 - **Interactive review** - Accept/reject track changes with a TUI
-- **Comment management** - List and filter reviewer comments
+- **Comment management** - List, filter, resolve, and reply to reviewer comments
+- **Response letter generation** - Auto-generate point-by-point response from comments
 - **DOI validation** - Check and find DOIs via Crossref/DataCite APIs
-- **Cross-reference conversion** - Auto-convert hardcoded "Figure 1" to dynamic `@fig:label` syntax
+- **Cross-reference conversion** - Auto-convert "Figures 1-3" to `@fig:label` syntax (handles complex patterns)
+- **Equation extraction** - Extract LaTeX equations from Word documents (OMML → LaTeX)
+- **Citation validation** - Check citations against bibliography
 
 ## Quick Start
 
@@ -134,6 +137,7 @@ rev build docx
 | `rev review <file>` | Interactive accept/reject TUI for track changes |
 | `rev status <file>` | Show annotation counts |
 | `rev comments <file>` | List all comments with context |
+| `rev resolve <file> -n 1` | Mark comment #1 as resolved |
 | `rev strip <file>` | Output clean Markdown (annotations applied) |
 
 ### Cross-References
@@ -159,6 +163,16 @@ rev build docx
 | `rev doi lookup [file.bib]` | Search for missing DOIs by title/author/year |
 | `rev doi fetch <doi>` | Fetch BibTeX entry from DOI |
 | `rev doi add <doi>` | Fetch and add DOI entry to bibliography |
+
+### Validation & Analysis
+
+| Command | Description |
+|---------|-------------|
+| `rev citations [file.bib]` | Validate citations against bibliography |
+| `rev figures [file]` | List figures/tables with reference counts |
+| `rev equations list` | List all equations in section files |
+| `rev equations from-word <docx>` | Extract equations from Word to LaTeX |
+| `rev response [files]` | Generate response letter from comments |
 
 ### Configuration
 
@@ -266,6 +280,9 @@ When importing from Word, hardcoded refs are auto-converted:
 - `Figure 1` → `@fig:heatmap`
 - `Fig. 2a` → `@fig:model`
 - `Figs. 1-3` → `@fig:heatmap; @fig:model; @fig:hierarchy`
+- `Figures 1, 2, and 3` → `@fig:one; @fig:two; @fig:three`
+- `Fig. 1a-c` → `@fig:one` (expands letter suffixes)
+- `Figs. 1a-3b` → all panels from 1a to 3b
 
 ## Build Outputs
 
