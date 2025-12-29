@@ -10,6 +10,8 @@ import {
   getComments,
   countAnnotations,
   applyDecision,
+  getTrackChanges,
+  setCommentStatus,
 } from '../lib/annotations.js';
 
 describe('parseAnnotations', () => {
@@ -186,5 +188,144 @@ describe('applyDecision', () => {
     const annotations = parseAnnotations(text);
     const result = applyDecision(text, annotations[0], false);
     assert.strictEqual(result, 'Hello world!');
+  });
+});
+
+describe('getTrackChanges', () => {
+  it('should return only track changes (no comments)', () => {
+    const text = '{++new++} {--old--} {~~a~>b~~} {>>comment<<}';
+    const changes = getTrackChanges(text);
+    assert.strictEqual(changes.length, 3);
+    assert.ok(changes.every(c => c.type !== 'comment'));
+  });
+
+  it('should return empty array for comments-only text', () => {
+    const text = '{>>Author: just a comment<<}';
+    const changes = getTrackChanges(text);
+    assert.strictEqual(changes.length, 0);
+  });
+});
+
+describe('setCommentStatus', () => {
+  it('should mark comment as resolved', () => {
+    const text = '{>>Reviewer: Please fix<<}';
+    const comments = getComments(text);
+    const result = setCommentStatus(text, comments[0], true);
+    assert.ok(result.includes('[RESOLVED]'));
+  });
+
+  it('should unmark resolved comment', () => {
+    const text = '{>>Reviewer: Done [RESOLVED]<<}';
+    const comments = getComments(text);
+    const result = setCommentStatus(text, comments[0], false);
+    assert.ok(!result.includes('[RESOLVED]'));
+  });
+});
+
+// Edge cases
+describe('parseAnnotations edge cases', () => {
+  it('should handle multiline insertions', () => {
+    const text = '{++line 1\nline 2++}';
+    const annotations = parseAnnotations(text);
+    assert.strictEqual(annotations.length, 1);
+    assert.ok(annotations[0].content.includes('\n'));
+  });
+
+  it('should handle nested braces in content', () => {
+    const text = '{++function() { return true; }++}';
+    const annotations = parseAnnotations(text);
+    assert.strictEqual(annotations.length, 1);
+  });
+
+  it('should handle empty content', () => {
+    const text = '{++  ++}';
+    const annotations = parseAnnotations(text);
+    // Should parse but content is whitespace
+    assert.strictEqual(annotations.length, 1);
+  });
+
+  it('should handle special characters in substitution', () => {
+    const text = '{~~$100~>$200~~}';
+    const annotations = parseAnnotations(text);
+    assert.strictEqual(annotations[0].content, '$100');
+    assert.strictEqual(annotations[0].replacement, '$200');
+  });
+
+  it('should handle unicode text', () => {
+    const text = '{++日本語のテキスト++}';
+    const annotations = parseAnnotations(text);
+    assert.strictEqual(annotations[0].content, '日本語のテキスト');
+  });
+
+  it('should not parse figure captions as comments', () => {
+    const text = '{>>Figure 1. A sample figure showing the results.<<}';
+    const comments = getComments(text);
+    assert.strictEqual(comments.length, 0);
+  });
+
+  it('should handle adjacent annotations', () => {
+    const text = '{++a++}{++b++}';
+    const annotations = parseAnnotations(text);
+    assert.strictEqual(annotations.length, 2);
+  });
+
+  it('should provide context for annotations', () => {
+    const text = 'Before {++inserted++} after';
+    const annotations = parseAnnotations(text);
+    assert.ok(annotations[0].before.includes('Before'));
+    assert.ok(annotations[0].after.includes('after'));
+  });
+});
+
+describe('stripAnnotations edge cases', () => {
+  it('should handle text with no annotations', () => {
+    const text = 'Plain text without annotations';
+    const result = stripAnnotations(text);
+    assert.strictEqual(result, text);
+  });
+
+  it('should handle multiple nested annotations', () => {
+    const text = '{++first {~~old~>new~~} last++}';
+    const result = stripAnnotations(text);
+    // Order of operations: substitutions first, then insertions
+    assert.ok(!result.includes('{'));
+  });
+
+  it('should preserve markdown formatting', () => {
+    const text = '**bold {++text++}**';
+    const result = stripAnnotations(text);
+    assert.strictEqual(result, '**bold text**');
+  });
+
+  it('should handle highlights', () => {
+    const text = '{==highlighted text==}';
+    const result = stripAnnotations(text);
+    assert.strictEqual(result, 'highlighted text');
+  });
+});
+
+describe('getComments edge cases', () => {
+  it('should handle long author names', () => {
+    const text = '{>>Dr. John Smith Jr.: comment<<}';
+    const comments = getComments(text);
+    assert.strictEqual(comments[0].author, 'Dr. John Smith Jr.');
+  });
+
+  it('should handle colons in comment text', () => {
+    const text = '{>>Author: Note: this is important<<}';
+    const comments = getComments(text);
+    assert.strictEqual(comments[0].content, 'Note: this is important');
+  });
+
+  it('should handle checkmark resolved marker', () => {
+    const text = '{>>Author: Done [✓]<<}';
+    const comments = getComments(text);
+    assert.strictEqual(comments[0].resolved, true);
+  });
+
+  it('should count comments correctly across files', () => {
+    const text = '{>>R1: first<<} {>>R2: second<<} {>>R1: third<<}';
+    const comments = getComments(text);
+    assert.strictEqual(comments.length, 3);
   });
 });
