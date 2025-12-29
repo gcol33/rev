@@ -747,10 +747,10 @@ program
           totalRefConversions += refConversions.length;
         }
 
-        // Insert Word comments into the annotated markdown
+        // Insert Word comments into the annotated markdown (quiet mode - no warnings)
         let commentsInserted = 0;
         if (comments.length > 0 && anchors.size > 0) {
-          annotated = insertCommentsIntoMarkdown(annotated, comments, anchors);
+          annotated = insertCommentsIntoMarkdown(annotated, comments, anchors, { quiet: true });
           commentsInserted = (annotated.match(/\{>>/g) || []).length - (result.annotated?.match(/\{>>/g) || []).length;
           if (commentsInserted > 0) {
             stats.comments = (stats.comments || 0) + commentsInserted;
