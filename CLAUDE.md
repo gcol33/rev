@@ -6,7 +6,7 @@ This is `docrev` (command: `rev`), a CLI tool for academic paper workflows with 
 
 - **Version**: 0.4.0
 - **Node.js**: >=18.0.0
-- **Test coverage**: 475 tests across 21 modules
+- **Test coverage**: 492 tests across 22 modules
 - **TypeScript**: Full type definitions in `types/index.d.ts`
 
 ## Key Commands for Claude
@@ -105,6 +105,17 @@ rev grammar --list        # Show custom dictionary
 rev grammar -s warning    # Filter by severity (error/warning/info)
 ```
 
+### Spelling
+```bash
+rev spelling              # Check spelling in all sections
+rev spelling --british    # Use British English dictionary
+rev spelling --learn word # Add to global dictionary (~/.rev-dictionary)
+rev spelling --learn-project word  # Add to project dictionary
+rev spelling --forget word         # Remove from global dictionary
+rev spelling --list       # Show global dictionary
+rev spelling --list-all   # Show global + project dictionaries
+```
+
 ### Direct DOCX Editing
 ```bash
 rev annotate paper.docx -m "Comment" -s "text"  # Add comment to Word doc
@@ -195,6 +206,7 @@ Available subpath exports:
 - `docrev/trackchanges` - Word track changes generation
 - `docrev/variables` - Template variable substitution
 - `docrev/word` - Word document handling
+- `docrev/spelling` - Spellchecking with global dictionary
 
 ## Development
 

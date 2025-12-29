@@ -4785,4 +4785,172 @@ program
     }
   });
 
+// ============================================================================
+// SPELLING command - Spellcheck with global dictionary
+// ============================================================================
+
+program
+  .command('spelling')
+  .description('Check spelling in markdown files')
+  .argument('[files...]', 'Files to check (default: section files)')
+  .option('--learn <word>', 'Add word to global dictionary')
+  .option('--learn-project <word>', 'Add word to project dictionary')
+  .option('--forget <word>', 'Remove word from global dictionary')
+  .option('--forget-project <word>', 'Remove word from project dictionary')
+  .option('--list', 'List global dictionary words')
+  .option('--list-project', 'List project dictionary words')
+  .option('--list-all', 'List all custom words (global + project)')
+  .option('--british', 'Use British English dictionary')
+  .action(async (files, options) => {
+    const spelling = await import('../lib/spelling.js');
+
+    // Handle dictionary management
+    if (options.learn) {
+      const added = spelling.addWord(options.learn, true);
+      if (added) {
+        console.log(fmt.status('success', `Added "${options.learn}" to global dictionary`));
+      } else {
+        console.log(chalk.yellow(`"${options.learn}" already in dictionary`));
+      }
+      return;
+    }
+
+    if (options.learnProject) {
+      const added = spelling.addWord(options.learnProject, false);
+      if (added) {
+        console.log(fmt.status('success', `Added "${options.learnProject}" to project dictionary`));
+      } else {
+        console.log(chalk.yellow(`"${options.learnProject}" already in dictionary`));
+      }
+      return;
+    }
+
+    if (options.forget) {
+      const removed = spelling.removeWord(options.forget, true);
+      if (removed) {
+        console.log(fmt.status('success', `Removed "${options.forget}" from global dictionary`));
+      } else {
+        console.log(chalk.yellow(`"${options.forget}" not in dictionary`));
+      }
+      return;
+    }
+
+    if (options.forgetProject) {
+      const removed = spelling.removeWord(options.forgetProject, false);
+      if (removed) {
+        console.log(fmt.status('success', `Removed "${options.forgetProject}" from project dictionary`));
+      } else {
+        console.log(chalk.yellow(`"${options.forgetProject}" not in dictionary`));
+      }
+      return;
+    }
+
+    if (options.list) {
+      const words = spelling.listWords(true);
+      console.log(fmt.header('Global Dictionary'));
+      if (words.length === 0) {
+        console.log(chalk.dim('  No custom words'));
+        console.log(chalk.dim('  Use --learn <word> to add words'));
+      } else {
+        for (const word of words) {
+          console.log(`  ${word}`);
+        }
+        console.log(chalk.dim(`\n${words.length} word(s)`));
+      }
+      return;
+    }
+
+    if (options.listProject) {
+      const words = spelling.listWords(false);
+      console.log(fmt.header('Project Dictionary'));
+      if (words.length === 0) {
+        console.log(chalk.dim('  No custom words'));
+        console.log(chalk.dim('  Use --learn-project <word> to add words'));
+      } else {
+        for (const word of words) {
+          console.log(`  ${word}`);
+        }
+        console.log(chalk.dim(`\n${words.length} word(s)`));
+      }
+      return;
+    }
+
+    if (options.listAll) {
+      const globalWords = spelling.listWords(true);
+      const projectWords = spelling.listWords(false);
+
+      console.log(fmt.header('Global Dictionary'));
+      if (globalWords.length === 0) {
+        console.log(chalk.dim('  No custom words'));
+      } else {
+        for (const word of globalWords) {
+          console.log(`  ${word}`);
+        }
+      }
+
+      console.log(fmt.header('Project Dictionary'));
+      if (projectWords.length === 0) {
+        console.log(chalk.dim('  No custom words'));
+      } else {
+        for (const word of projectWords) {
+          console.log(`  ${word}`);
+        }
+      }
+
+      console.log(chalk.dim(`\nTotal: ${globalWords.length + projectWords.length} word(s)`));
+      return;
+    }
+
+    // Check spelling in files
+    let filesToCheck = files;
+
+    if (filesToCheck.length === 0) {
+      // Default to section files if in a project
+      if (fs.existsSync('rev.yaml')) {
+        const { getSectionFiles } = await import('../lib/sections.js');
+        filesToCheck = getSectionFiles('.');
+      } else {
+        // Check all .md files in current directory
+        filesToCheck = fs.readdirSync('.')
+          .filter(f => f.endsWith('.md') && !f.startsWith('.'));
+      }
+    }
+
+    if (filesToCheck.length === 0) {
+      console.log(chalk.yellow('No markdown files found'));
+      return;
+    }
+
+    const lang = options.british ? 'en-gb' : 'en';
+    console.log(fmt.header(`Spelling Check (${options.british ? 'British' : 'US'} English)`));
+    let totalIssues = 0;
+
+    for (const file of filesToCheck) {
+      if (!fs.existsSync(file)) {
+        console.log(chalk.yellow(`File not found: ${file}`));
+        continue;
+      }
+
+      const issues = await spelling.checkFile(file, { projectDir: '.', lang });
+
+      if (issues.length > 0) {
+        console.log(chalk.cyan(`\n${file}:`));
+        for (const issue of issues) {
+          const suggestions = issue.suggestions.length > 0
+            ? chalk.dim(` → ${issue.suggestions.join(', ')}`)
+            : '';
+          console.log(`  ${chalk.yellow(issue.word)} ${chalk.dim(`(line ${issue.line})`)}${suggestions}`);
+        }
+        totalIssues += issues.length;
+      }
+    }
+
+    if (totalIssues === 0) {
+      console.log(fmt.status('success', 'No spelling errors found'));
+    } else {
+      console.log(chalk.yellow(`\n${totalIssues} spelling issue(s) found`));
+      console.log(chalk.dim('Use --learn <word> to add words to dictionary'));
+    }
+  });
+
 program.parse();

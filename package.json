@@ -64,6 +64,10 @@
     "./trackchanges": {
       "types": "./types/index.d.ts",
       "import": "./lib/trackchanges.js"
+    },
+    "./spelling": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/spelling.js"
     }
   },
   "engines": {
@@ -103,10 +107,13 @@
     "adm-zip": "^0.5.16",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
+    "dictionary-en": "^4.0.0",
+    "dictionary-en-gb": "^3.0.0",
     "diff": "^8.0.2",
     "js-yaml": "^4.1.1",
     "mammoth": "^1.6.0",
     "mathml-to-latex": "^1.5.0",
+    "nspell": "^2.1.5",
     "xml2js": "^0.6.2"
   },
   "devDependencies": {
