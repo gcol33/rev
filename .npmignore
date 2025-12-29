@@ -11,6 +11,7 @@ CLAUDE.md
 test/
 tests/
 *.test.js
+coverage/
 
 # Documentation (README included by default)
 docs/
