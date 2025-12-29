@@ -3,13 +3,80 @@
   "version": "0.3.2",
   "description": "Academic paper revision workflow: Word ↔ Markdown round-trips, DOI validation, reviewer comments",
   "type": "module",
+  "types": "types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/annotations.js"
+    },
+    "./annotations": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/annotations.js"
+    },
+    "./build": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/build.js"
+    },
+    "./citations": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/citations.js"
+    },
+    "./crossref": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/crossref.js"
+    },
+    "./doi": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/doi.js"
+    },
+    "./equations": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/equations.js"
+    },
+    "./git": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/git.js"
+    },
+    "./journals": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/journals.js"
+    },
+    "./merge": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/merge.js"
+    },
+    "./sections": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/sections.js"
+    },
+    "./word": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/word.js"
+    },
+    "./variables": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/variables.js"
+    },
+    "./grammar": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/grammar.js"
+    },
+    "./trackchanges": {
+      "types": "./types/index.d.ts",
+      "import": "./lib/trackchanges.js"
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "bin": {
     "rev": "bin/rev.js"
   },
   "scripts": {
     "build": "echo 'No build needed'",
     "test": "node --test test/*.test.js",
-    "test:watch": "node --test --watch test/*.test.js"
+    "test:watch": "node --test --watch test/*.test.js",
+    "test:coverage": "c8 --reporter=text --reporter=lcov node --test test/*.test.js"
   },
   "repository": {
     "type": "git",
@@ -41,5 +108,8 @@
     "mammoth": "^1.6.0",
     "mathml-to-latex": "^1.5.0",
     "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "c8": "^10.1.2"
   }
 }

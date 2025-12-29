@@ -3333,4 +3333,1146 @@ ${chalk.bold('rev help')} [topic]
 `);
 }
 
+// ============================================================================
+// COMPLETIONS command - Shell completions
+// ============================================================================
+
+program
+  .command('completions')
+  .description('Output shell completions')
+  .argument('<shell>', 'Shell type: bash, zsh')
+  .action((shell) => {
+    const completionsDir = path.join(import.meta.dirname, '..', 'completions');
+
+    if (shell === 'bash') {
+      const bashFile = path.join(completionsDir, 'rev.bash');
+      if (fs.existsSync(bashFile)) {
+        console.log(fs.readFileSync(bashFile, 'utf-8'));
+      } else {
+        console.error(chalk.red('Bash completions not found'));
+        process.exit(1);
+      }
+    } else if (shell === 'zsh') {
+      const zshFile = path.join(completionsDir, 'rev.zsh');
+      if (fs.existsSync(zshFile)) {
+        console.log(fs.readFileSync(zshFile, 'utf-8'));
+      } else {
+        console.error(chalk.red('Zsh completions not found'));
+        process.exit(1);
+      }
+    } else {
+      console.error(chalk.red(`Unknown shell: ${shell}`));
+      console.log(chalk.dim('Supported shells: bash, zsh'));
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
+// WORD-COUNT command - Per-section word counts
+// ============================================================================
+
+program
+  .command('word-count')
+  .alias('wc')
+  .description('Show word counts per section')
+  .option('-l, --limit <number>', 'Warn if total exceeds limit', parseInt)
+  .option('-j, --journal <name>', 'Use journal word limit')
+  .action(async (options) => {
+    let config = {};
+    try {
+      config = loadBuildConfig() || {};
+    } catch {
+      // Not in a rev project, that's ok
+    }
+    const sections = config.sections || [];
+
+    if (sections.length === 0) {
+      // Try to find .md files
+      const mdFiles = fs.readdirSync('.').filter(f =>
+        f.endsWith('.md') && !['README.md', 'CLAUDE.md', 'paper.md'].includes(f)
+      );
+      if (mdFiles.length === 0) {
+        console.error(chalk.red('No section files found. Run from a rev project directory.'));
+        process.exit(1);
+      }
+      sections.push(...mdFiles);
+    }
+
+    const countWords = (text) => {
+      return text
+        .replace(/^---[\s\S]*?---/m, '')
+        .replace(/!\[.*?\]\(.*?\)/g, '')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/#+\s*/g, '')
+        .replace(/\*\*|__|[*_`]/g, '')
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/\{[^}]+\}/g, '')
+        .replace(/@\w+:\w+/g, '')
+        .replace(/@\w+/g, '')
+        .replace(/\|[^|]+\|/g, ' ')
+        .replace(/\n+/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(w => w.length > 0).length;
+    };
+
+    let total = 0;
+    const rows = [];
+
+    for (const section of sections) {
+      if (!fs.existsSync(section)) continue;
+      const text = fs.readFileSync(section, 'utf-8');
+      const words = countWords(text);
+      total += words;
+      rows.push([section, words.toLocaleString()]);
+    }
+
+    rows.push(['', '']);
+    rows.push([chalk.bold('Total'), chalk.bold(total.toLocaleString())]);
+
+    console.log(fmt.header('Word Count'));
+    console.log(fmt.table(['Section', 'Words'], rows));
+
+    // Check limit
+    let limit = options.limit;
+    if (options.journal) {
+      const { getJournalProfile } = await import('../lib/journals.js');
+      const profile = getJournalProfile(options.journal);
+      if (profile?.requirements?.wordLimit?.main) {
+        limit = profile.requirements.wordLimit.main;
+        console.log(chalk.dim(`\nUsing ${profile.name} word limit: ${limit.toLocaleString()}`));
+      }
+    }
+
+    if (limit && total > limit) {
+      console.log(chalk.red(`\n⚠ Over limit by ${(total - limit).toLocaleString()} words`));
+    } else if (limit) {
+      console.log(chalk.green(`\n✓ Within limit (${(limit - total).toLocaleString()} words remaining)`));
+    }
+  });
+
+// ============================================================================
+// STATS command - Project dashboard
+// ============================================================================
+
+program
+  .command('stats')
+  .description('Show project statistics dashboard')
+  .action(async () => {
+    let config = {};
+    try {
+      config = loadBuildConfig() || {};
+    } catch {
+      // Not in a rev project, that's ok
+    }
+    let sections = config.sections || [];
+
+    if (sections.length === 0) {
+      sections = fs.readdirSync('.').filter(f =>
+        f.endsWith('.md') && !['README.md', 'CLAUDE.md', 'paper.md'].includes(f)
+      );
+    }
+
+    const countWords = (text) => {
+      return text
+        .replace(/^---[\s\S]*?---/m, '')
+        .replace(/!\[.*?\]\(.*?\)/g, '')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/[#*_`]/g, '')
+        .replace(/\{[^}]+\}/g, '')
+        .replace(/@\w+/g, '')
+        .replace(/\n+/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(w => w.length > 0).length;
+    };
+
+    let totalWords = 0;
+    let totalFigures = 0;
+    let totalTables = 0;
+    let totalComments = 0;
+    let pendingComments = 0;
+    const citations = new Set();
+
+    for (const section of sections) {
+      if (!fs.existsSync(section)) continue;
+      const text = fs.readFileSync(section, 'utf-8');
+
+      totalWords += countWords(text);
+      totalFigures += (text.match(/!\[.*?\]\(.*?\)/g) || []).length;
+      totalTables += (text.match(/^\|[^|]+\|/gm) || []).length / 5; // Approximate
+
+      const comments = getComments(text);
+      totalComments += comments.length;
+      pendingComments += comments.filter(c => !c.resolved).length;
+
+      const cites = text.match(/@(\w+)(?![:\w])/g) || [];
+      cites.forEach(c => citations.add(c.slice(1)));
+    }
+
+    console.log(fmt.header('Project Statistics'));
+    console.log();
+
+    const stats = [
+      ['Sections', sections.length],
+      ['Words', totalWords.toLocaleString()],
+      ['Figures', Math.round(totalFigures)],
+      ['Tables', Math.round(totalTables)],
+      ['Citations', citations.size],
+      ['Comments', `${totalComments} (${pendingComments} pending)`],
+    ];
+
+    for (const [label, value] of stats) {
+      console.log(`  ${chalk.dim(label.padEnd(12))} ${chalk.bold(value)}`);
+    }
+
+    // Bibliography stats
+    const bibPath = config.bibliography || 'references.bib';
+    if (fs.existsSync(bibPath)) {
+      const bibContent = fs.readFileSync(bibPath, 'utf-8');
+      const bibEntries = (bibContent.match(/@\w+\s*\{/g) || []).length;
+      console.log(`  ${chalk.dim('Bib entries'.padEnd(12))} ${chalk.bold(bibEntries)}`);
+    }
+
+    console.log();
+  });
+
+// ============================================================================
+// SEARCH command - Search across section files
+// ============================================================================
+
+program
+  .command('search')
+  .description('Search across all section files')
+  .argument('<query>', 'Search query (supports regex)')
+  .option('-i, --ignore-case', 'Case-insensitive search')
+  .option('-c, --context <lines>', 'Show context lines', parseInt, 1)
+  .action((query, options) => {
+    let config = {};
+    try {
+      config = loadBuildConfig() || {};
+    } catch {
+      // Not in a rev project, that's ok
+    }
+    let sections = config.sections || [];
+
+    if (sections.length === 0) {
+      sections = fs.readdirSync('.').filter(f =>
+        f.endsWith('.md') && !['README.md', 'CLAUDE.md'].includes(f)
+      );
+    }
+
+    const flags = options.ignoreCase ? 'gi' : 'g';
+    let pattern;
+    try {
+      pattern = new RegExp(query, flags);
+    } catch {
+      pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags);
+    }
+
+    let totalMatches = 0;
+
+    for (const section of sections) {
+      if (!fs.existsSync(section)) continue;
+      const text = fs.readFileSync(section, 'utf-8');
+      const lines = text.split('\n');
+
+      const matches = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (pattern.test(lines[i])) {
+          matches.push({ line: i + 1, text: lines[i] });
+          pattern.lastIndex = 0;
+        }
+      }
+
+      if (matches.length > 0) {
+        console.log(chalk.cyan.bold(`\n${section}`));
+        for (const match of matches) {
+          const highlighted = match.text.replace(pattern, (m) => chalk.yellow.bold(m));
+          console.log(`  ${chalk.dim(match.line + ':')} ${highlighted}`);
+        }
+        totalMatches += matches.length;
+      }
+    }
+
+    if (totalMatches === 0) {
+      console.log(chalk.yellow(`No matches found for "${query}"`));
+    } else {
+      console.log(chalk.dim(`\n${totalMatches} match${totalMatches === 1 ? '' : 'es'} found`));
+    }
+  });
+
+// ============================================================================
+// BACKUP command - Timestamped project backup
+// ============================================================================
+
+program
+  .command('backup')
+  .description('Create timestamped project backup')
+  .option('-n, --name <name>', 'Custom backup name')
+  .option('-o, --output <dir>', 'Output directory', '.')
+  .action(async (options) => {
+    const { default: AdmZip } = await import('adm-zip');
+    const zip = new AdmZip();
+
+    const date = new Date().toISOString().slice(0, 10);
+    const name = options.name || `backup-${date}`;
+    const outputPath = path.join(options.output, `${name}.zip`);
+
+    // Files to include
+    const includePatterns = [
+      '*.md', '*.yaml', '*.yml', '*.bib', '*.csl',
+      'figures/*', 'images/*', 'assets/*'
+    ];
+
+    // Files to exclude
+    const excludePatterns = [
+      'node_modules', '.git', '*.docx', '*.pdf', '*.zip',
+      'paper.md' // Generated file
+    ];
+
+    const shouldInclude = (file) => {
+      for (const pattern of excludePatterns) {
+        if (file.includes(pattern.replace('*', ''))) return false;
+      }
+      return true;
+    };
+
+    const addDir = (dir, zipPath = '') => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        const entryZipPath = path.join(zipPath, entry.name);
+
+        if (!shouldInclude(entry.name)) continue;
+
+        if (entry.isDirectory()) {
+          addDir(fullPath, entryZipPath);
+        } else {
+          zip.addLocalFile(fullPath, zipPath || undefined);
+        }
+      }
+    };
+
+    // Add current directory
+    const entries = fs.readdirSync('.', { withFileTypes: true });
+    for (const entry of entries) {
+      if (!shouldInclude(entry.name)) continue;
+
+      if (entry.isDirectory()) {
+        addDir(entry.name, entry.name);
+      } else if (entry.isFile()) {
+        zip.addLocalFile(entry.name);
+      }
+    }
+
+    zip.writeZip(outputPath);
+    console.log(fmt.status('success', `Backup created: ${outputPath}`));
+  });
+
+// ============================================================================
+// EXPORT command - Export project as distributable zip
+// ============================================================================
+
+program
+  .command('export')
+  .description('Export project as distributable zip')
+  .option('-o, --output <file>', 'Output filename')
+  .option('--include-output', 'Include built PDF/DOCX files')
+  .action(async (options) => {
+    const { default: AdmZip } = await import('adm-zip');
+    let config = {};
+    try {
+      config = loadBuildConfig() || {};
+    } catch {
+      // Not in a rev project, that's ok
+    }
+
+    // Build first if including output
+    if (options.includeOutput) {
+      console.log(chalk.dim('Building documents...'));
+      await build(['pdf', 'docx']);
+    }
+
+    const zip = new AdmZip();
+    const projectName = config.title?.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase() || 'project';
+    const outputPath = options.output || `${projectName}-export.zip`;
+
+    const exclude = ['node_modules', '.git', '.DS_Store', '*.zip'];
+
+    const shouldInclude = (name) => {
+      if (!options.includeOutput && (name.endsWith('.pdf') || name.endsWith('.docx'))) {
+        return false;
+      }
+      for (const pattern of exclude) {
+        if (name === pattern || name.includes(pattern.replace('*', ''))) return false;
+      }
+      return true;
+    };
+
+    const addDir = (dir, zipPath = '') => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        const entryZipPath = path.join(zipPath, entry.name);
+
+        if (!shouldInclude(entry.name)) continue;
+
+        if (entry.isDirectory()) {
+          addDir(fullPath, entryZipPath);
+        } else {
+          zip.addLocalFile(fullPath, zipPath || undefined);
+        }
+      }
+    };
+
+    const entries = fs.readdirSync('.', { withFileTypes: true });
+    for (const entry of entries) {
+      if (!shouldInclude(entry.name)) continue;
+
+      if (entry.isDirectory()) {
+        addDir(entry.name, entry.name);
+      } else if (entry.isFile()) {
+        zip.addLocalFile(entry.name);
+      }
+    }
+
+    zip.writeZip(outputPath);
+    console.log(fmt.status('success', `Exported: ${outputPath}`));
+  });
+
+// ============================================================================
+// PREVIEW command - Build and open document
+// ============================================================================
+
+program
+  .command('preview')
+  .description('Build and open document in default app')
+  .argument('[format]', 'Format to preview: pdf, docx', 'pdf')
+  .action(async (format) => {
+    const { exec } = require('child_process');
+    let config = {};
+    try {
+      config = loadBuildConfig() || {};
+    } catch (err) {
+      console.error(chalk.red('Not in a rev project directory (no rev.yaml found)'));
+      process.exit(1);
+    }
+
+    console.log(chalk.dim(`Building ${format}...`));
+    const results = await build([format]);
+
+    const result = results.find(r => r.format === format);
+    if (!result?.success) {
+      console.error(chalk.red(`Build failed: ${result?.error || 'Unknown error'}`));
+      process.exit(1);
+    }
+
+    const outputFile = result.output;
+    if (!fs.existsSync(outputFile)) {
+      console.error(chalk.red(`Output file not found: ${outputFile}`));
+      process.exit(1);
+    }
+
+    // Open with system default
+    const openCmd = process.platform === 'darwin' ? 'open' :
+                    process.platform === 'win32' ? 'start' : 'xdg-open';
+
+    exec(`${openCmd} "${outputFile}"`, (err) => {
+      if (err) {
+        console.error(chalk.red(`Could not open file: ${err.message}`));
+      } else {
+        console.log(fmt.status('success', `Opened ${outputFile}`));
+      }
+    });
+  });
+
+// ============================================================================
+// WATCH command - Auto-rebuild on changes
+// ============================================================================
+
+program
+  .command('watch')
+  .description('Watch files and auto-rebuild on changes')
+  .argument('[format]', 'Format to build: pdf, docx, all', 'pdf')
+  .option('--no-open', 'Do not open after first build')
+  .action(async (format, options) => {
+    const { exec } = require('child_process');
+    let config = {};
+    try {
+      config = loadBuildConfig() || {};
+    } catch (err) {
+      console.error(chalk.red('Not in a rev project directory (no rev.yaml found)'));
+      process.exit(1);
+    }
+    let sections = config.sections || [];
+
+    if (sections.length === 0) {
+      sections = fs.readdirSync('.').filter(f =>
+        f.endsWith('.md') && !['README.md', 'CLAUDE.md', 'paper.md'].includes(f)
+      );
+    }
+
+    const filesToWatch = [
+      ...sections,
+      'rev.yaml',
+      config.bibliography || 'references.bib'
+    ].filter(f => fs.existsSync(f));
+
+    console.log(fmt.header('Watch Mode'));
+    console.log(chalk.dim(`Watching: ${filesToWatch.join(', ')}`));
+    console.log(chalk.dim('Press Ctrl+C to stop\n'));
+
+    let building = false;
+    let pendingBuild = false;
+
+    const doBuild = async () => {
+      if (building) {
+        pendingBuild = true;
+        return;
+      }
+
+      building = true;
+      console.log(chalk.dim(`\n[${new Date().toLocaleTimeString()}] Rebuilding...`));
+
+      try {
+        const formats = format === 'all' ? ['pdf', 'docx'] : [format];
+        const results = await build(formats);
+
+        for (const r of results) {
+          if (r.success) {
+            console.log(chalk.green(`  ✓ ${r.format}: ${r.output}`));
+          } else {
+            console.log(chalk.red(`  ✗ ${r.format}: ${r.error}`));
+          }
+        }
+      } catch (err) {
+        console.error(chalk.red(`  Build error: ${err.message}`));
+      }
+
+      building = false;
+      if (pendingBuild) {
+        pendingBuild = false;
+        doBuild();
+      }
+    };
+
+    // Initial build
+    await doBuild();
+
+    // Open after first build
+    if (options.open) {
+      const outputFile = format === 'docx' ?
+        (config.title?.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase() || 'paper') + '.docx' :
+        (config.title?.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase() || 'paper') + '.pdf';
+
+      if (fs.existsSync(outputFile)) {
+        const openCmd = process.platform === 'darwin' ? 'open' :
+                        process.platform === 'win32' ? 'start' : 'xdg-open';
+        exec(`${openCmd} "${outputFile}"`);
+      }
+    }
+
+    // Watch files
+    for (const file of filesToWatch) {
+      fs.watch(file, { persistent: true }, (eventType) => {
+        if (eventType === 'change') {
+          doBuild();
+        }
+      });
+    }
+  });
+
+// ============================================================================
+// LINT command - Check for common issues
+// ============================================================================
+
+program
+  .command('lint')
+  .description('Check for common issues in the project')
+  .option('--fix', 'Auto-fix issues where possible')
+  .action(async (options) => {
+    let config = {};
+    try {
+      config = loadBuildConfig() || {};
+    } catch {
+      // Not in a rev project, that's ok
+    }
+    let sections = config.sections || [];
+
+    if (sections.length === 0) {
+      sections = fs.readdirSync('.').filter(f =>
+        f.endsWith('.md') && !['README.md', 'CLAUDE.md', 'paper.md'].includes(f)
+      );
+    }
+
+    const issues = [];
+    const warnings = [];
+
+    // Collect all content
+    let allText = '';
+    for (const section of sections) {
+      if (fs.existsSync(section)) {
+        allText += fs.readFileSync(section, 'utf-8') + '\n';
+      }
+    }
+
+    // Check 1: Broken cross-references
+    const figAnchors = new Set();
+    const tblAnchors = new Set();
+    const eqAnchors = new Set();
+
+    const anchorPattern = /\{#(fig|tbl|eq):([^}]+)\}/g;
+    let match;
+    while ((match = anchorPattern.exec(allText)) !== null) {
+      if (match[1] === 'fig') figAnchors.add(match[2]);
+      else if (match[1] === 'tbl') tblAnchors.add(match[2]);
+      else if (match[1] === 'eq') eqAnchors.add(match[2]);
+    }
+
+    const refPattern = /@(fig|tbl|eq):([a-zA-Z0-9_-]+)/g;
+    while ((match = refPattern.exec(allText)) !== null) {
+      const type = match[1];
+      const label = match[2];
+      const anchors = type === 'fig' ? figAnchors : type === 'tbl' ? tblAnchors : eqAnchors;
+
+      if (!anchors.has(label)) {
+        issues.push({
+          type: 'error',
+          message: `Broken reference: @${type}:${label}`,
+          fix: null
+        });
+      }
+    }
+
+    // Check 2: Orphaned figures (defined but not referenced)
+    for (const label of figAnchors) {
+      if (!allText.includes(`@fig:${label}`)) {
+        warnings.push({
+          type: 'warning',
+          message: `Unreferenced figure: {#fig:${label}}`,
+        });
+      }
+    }
+
+    // Check 3: Missing citations
+    const bibPath = config.bibliography || 'references.bib';
+    if (fs.existsSync(bibPath)) {
+      const bibContent = fs.readFileSync(bibPath, 'utf-8');
+      const bibKeys = new Set();
+      const bibPattern = /@\w+\s*\{\s*([^,]+)/g;
+      while ((match = bibPattern.exec(bibContent)) !== null) {
+        bibKeys.add(match[1].trim());
+      }
+
+      const citePattern = /@([a-zA-Z][a-zA-Z0-9_-]*)(?![:\w])/g;
+      while ((match = citePattern.exec(allText)) !== null) {
+        const key = match[1];
+        if (!bibKeys.has(key) && !['fig', 'tbl', 'eq'].includes(key)) {
+          issues.push({
+            type: 'error',
+            message: `Missing citation: @${key}`,
+          });
+        }
+      }
+    }
+
+    // Check 4: Unresolved comments
+    const comments = getComments(allText);
+    const pending = comments.filter(c => !c.resolved);
+    if (pending.length > 0) {
+      warnings.push({
+        type: 'warning',
+        message: `${pending.length} unresolved comment${pending.length === 1 ? '' : 's'}`,
+      });
+    }
+
+    // Check 5: Empty sections
+    for (const section of sections) {
+      if (fs.existsSync(section)) {
+        const content = fs.readFileSync(section, 'utf-8').trim();
+        if (content.length < 50) {
+          warnings.push({
+            type: 'warning',
+            message: `Section appears empty: ${section}`,
+          });
+        }
+      }
+    }
+
+    // Output results
+    console.log(fmt.header('Lint Results'));
+    console.log();
+
+    if (issues.length === 0 && warnings.length === 0) {
+      console.log(chalk.green('✓ No issues found'));
+      return;
+    }
+
+    for (const issue of issues) {
+      console.log(chalk.red(`  ✗ ${issue.message}`));
+    }
+
+    for (const warning of warnings) {
+      console.log(chalk.yellow(`  ⚠ ${warning.message}`));
+    }
+
+    console.log();
+    console.log(chalk.dim(`${issues.length} error${issues.length === 1 ? '' : 's'}, ${warnings.length} warning${warnings.length === 1 ? '' : 's'}`));
+
+    if (issues.length > 0) {
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
+// GRAMMAR command - Check grammar and style
+// ============================================================================
+
+program
+  .command('grammar')
+  .description('Check grammar and style issues')
+  .argument('[files...]', 'Markdown files to check')
+  .option('--learn <word>', 'Add word to custom dictionary')
+  .option('--forget <word>', 'Remove word from custom dictionary')
+  .option('--list', 'List custom dictionary words')
+  .option('--rules', 'List available grammar rules')
+  .option('--no-scientific', 'Disable scientific writing rules')
+  .option('-s, --severity <level>', 'Minimum severity: error, warning, info', 'info')
+  .action(async (files, options) => {
+    const {
+      checkGrammar,
+      getGrammarSummary,
+      loadDictionary,
+      addToDictionary,
+      removeFromDictionary,
+      listRules,
+    } = await import('../lib/grammar.js');
+
+    // Handle dictionary management
+    if (options.learn) {
+      const added = addToDictionary(options.learn);
+      if (added) {
+        console.log(fmt.status('success', `Added "${options.learn}" to dictionary`));
+      } else {
+        console.log(chalk.dim(`"${options.learn}" already in dictionary`));
+      }
+      return;
+    }
+
+    if (options.forget) {
+      const removed = removeFromDictionary(options.forget);
+      if (removed) {
+        console.log(fmt.status('success', `Removed "${options.forget}" from dictionary`));
+      } else {
+        console.log(chalk.yellow(`"${options.forget}" not in dictionary`));
+      }
+      return;
+    }
+
+    if (options.list) {
+      const words = loadDictionary();
+      console.log(fmt.header('Custom Dictionary'));
+      console.log();
+      if (words.size === 0) {
+        console.log(chalk.dim('  No custom words defined'));
+        console.log(chalk.dim('  Use --learn <word> to add words'));
+      } else {
+        const sorted = [...words].sort();
+        for (const word of sorted) {
+          console.log(`  ${word}`);
+        }
+        console.log();
+        console.log(chalk.dim(`${words.size} word(s)`));
+      }
+      return;
+    }
+
+    if (options.rules) {
+      const rules = listRules(options.scientific);
+      console.log(fmt.header('Grammar Rules'));
+      console.log();
+      for (const rule of rules) {
+        const icon = rule.severity === 'error' ? chalk.red('●') :
+                     rule.severity === 'warning' ? chalk.yellow('●') :
+                     chalk.blue('●');
+        console.log(`  ${icon} ${chalk.bold(rule.id)}`);
+        console.log(chalk.dim(`     ${rule.message}`));
+      }
+      return;
+    }
+
+    // Get files to check
+    let mdFiles = files;
+    if (!mdFiles || mdFiles.length === 0) {
+      let config = {};
+      try {
+        config = loadBuildConfig() || {};
+      } catch {
+        // Not in a rev project
+      }
+      mdFiles = config.sections || [];
+
+      if (mdFiles.length === 0) {
+        mdFiles = fs.readdirSync('.').filter(f =>
+          f.endsWith('.md') && !['README.md', 'CLAUDE.md', 'paper.md'].includes(f)
+        );
+      }
+    }
+
+    if (mdFiles.length === 0) {
+      console.error(chalk.red('No markdown files found'));
+      process.exit(1);
+    }
+
+    console.log(fmt.header('Grammar Check'));
+    console.log();
+
+    const severityLevels = { error: 3, warning: 2, info: 1 };
+    const minSeverity = severityLevels[options.severity] || 1;
+
+    let allIssues = [];
+
+    for (const file of mdFiles) {
+      if (!fs.existsSync(file)) continue;
+
+      const text = fs.readFileSync(file, 'utf-8');
+      const issues = checkGrammar(text, { scientific: options.scientific });
+
+      // Filter by severity
+      const filtered = issues.filter(i => severityLevels[i.severity] >= minSeverity);
+
+      if (filtered.length > 0) {
+        console.log(chalk.cyan.bold(file));
+
+        for (const issue of filtered) {
+          const icon = issue.severity === 'error' ? chalk.red('●') :
+                       issue.severity === 'warning' ? chalk.yellow('●') :
+                       chalk.blue('●');
+
+          console.log(`  ${chalk.dim(`L${issue.line}:`)} ${icon} ${issue.message}`);
+          console.log(chalk.dim(`      "${issue.match}" in: ${issue.context.slice(0, 60)}...`));
+        }
+        console.log();
+        allIssues.push(...filtered.map(i => ({ ...i, file })));
+      }
+    }
+
+    const summary = getGrammarSummary(allIssues);
+
+    if (summary.total === 0) {
+      console.log(chalk.green('✓ No issues found'));
+    } else {
+      console.log(chalk.dim(`Found ${summary.total} issue(s): ${summary.errors} errors, ${summary.warnings} warnings, ${summary.info} info`));
+      console.log();
+      console.log(chalk.dim('Tip: Use --learn <word> to add words to dictionary'));
+    }
+  });
+
+// ============================================================================
+// ANNOTATE command - Add comments to Word document
+// ============================================================================
+
+program
+  .command('annotate')
+  .description('Add comment to Word document')
+  .argument('<docx>', 'Word document')
+  .option('-m, --message <text>', 'Comment text')
+  .option('-s, --search <text>', 'Text to attach comment to')
+  .option('-a, --author <name>', 'Comment author')
+  .action(async (docxPath, options) => {
+    if (!fs.existsSync(docxPath)) {
+      console.error(chalk.red(`File not found: ${docxPath}`));
+      process.exit(1);
+    }
+
+    if (!options.message) {
+      console.error(chalk.red('Comment message required (-m)'));
+      process.exit(1);
+    }
+
+    const { default: AdmZip } = await import('adm-zip');
+    const zip = new AdmZip(docxPath);
+
+    // Read document.xml
+    const docEntry = zip.getEntry('word/document.xml');
+    if (!docEntry) {
+      console.error(chalk.red('Invalid Word document'));
+      process.exit(1);
+    }
+
+    let docXml = zip.readAsText(docEntry);
+
+    // Read or create comments.xml
+    let commentsEntry = zip.getEntry('word/comments.xml');
+    let commentsXml;
+    let nextCommentId = 1;
+
+    if (commentsEntry) {
+      commentsXml = zip.readAsText(commentsEntry);
+      // Find highest existing comment ID
+      const idMatches = commentsXml.match(/w:id="(\d+)"/g) || [];
+      for (const m of idMatches) {
+        const id = parseInt(m.match(/\d+/)[0]);
+        if (id >= nextCommentId) nextCommentId = id + 1;
+      }
+    } else {
+      commentsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+</w:comments>`;
+    }
+
+    const author = options.author || getUserName() || 'Claude';
+    const date = new Date().toISOString();
+    const commentId = nextCommentId;
+
+    // Add comment to comments.xml
+    const newComment = `<w:comment w:id="${commentId}" w:author="${author}" w:date="${date}">
+  <w:p><w:r><w:t>${options.message}</w:t></w:r></w:p>
+</w:comment>`;
+
+    commentsXml = commentsXml.replace('</w:comments>', `${newComment}\n</w:comments>`);
+
+    // Find text and add comment markers
+    if (options.search) {
+      const searchText = options.search;
+      const textPattern = new RegExp(`(<w:t[^>]*>)([^<]*${searchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^<]*)(<\/w:t>)`, 'i');
+
+      if (textPattern.test(docXml)) {
+        docXml = docXml.replace(textPattern, (match, start, text, end) => {
+          return `<w:commentRangeStart w:id="${commentId}"/>${start}${text}${end}<w:commentRangeEnd w:id="${commentId}"/><w:r><w:commentReference w:id="${commentId}"/></w:r>`;
+        });
+      } else {
+        console.log(chalk.yellow(`Text "${searchText}" not found in document. Comment added without anchor.`));
+      }
+    }
+
+    // Update zip
+    zip.updateFile('word/document.xml', Buffer.from(docXml));
+
+    if (commentsEntry) {
+      zip.updateFile('word/comments.xml', Buffer.from(commentsXml));
+    } else {
+      zip.addFile('word/comments.xml', Buffer.from(commentsXml));
+
+      // Update [Content_Types].xml to include comments
+      const ctEntry = zip.getEntry('[Content_Types].xml');
+      if (ctEntry) {
+        let ctXml = zip.readAsText(ctEntry);
+        if (!ctXml.includes('comments.xml')) {
+          ctXml = ctXml.replace('</Types>',
+            '<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>\n</Types>');
+          zip.updateFile('[Content_Types].xml', Buffer.from(ctXml));
+        }
+      }
+
+      // Update document.xml.rels
+      const relsEntry = zip.getEntry('word/_rels/document.xml.rels');
+      if (relsEntry) {
+        let relsXml = zip.readAsText(relsEntry);
+        if (!relsXml.includes('comments.xml')) {
+          const newRelId = `rId${Date.now()}`;
+          relsXml = relsXml.replace('</Relationships>',
+            `<Relationship Id="${newRelId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/>\n</Relationships>`);
+          zip.updateFile('word/_rels/document.xml.rels', Buffer.from(relsXml));
+        }
+      }
+    }
+
+    // Write back
+    zip.writeZip(docxPath);
+    console.log(fmt.status('success', `Added comment to ${docxPath}`));
+  });
+
+// ============================================================================
+// APPLY command - Apply MD annotations as Word track changes
+// ============================================================================
+
+program
+  .command('apply')
+  .description('Apply markdown annotations to Word document as track changes')
+  .argument('<md>', 'Markdown file with annotations')
+  .argument('<docx>', 'Output Word document')
+  .option('-a, --author <name>', 'Author name for track changes')
+  .action(async (mdPath, docxPath, options) => {
+    if (!fs.existsSync(mdPath)) {
+      console.error(chalk.red(`File not found: ${mdPath}`));
+      process.exit(1);
+    }
+
+    const mdContent = fs.readFileSync(mdPath, 'utf-8');
+    const annotations = parseAnnotations(mdContent);
+
+    if (annotations.length === 0) {
+      console.log(chalk.yellow('No annotations found in markdown file'));
+      // Still build the document
+    }
+
+    const author = options.author || getUserName() || 'Author';
+
+    // Build document with track changes
+    const { buildWithTrackChanges } = await import('../lib/trackchanges.js');
+
+    try {
+      const result = await buildWithTrackChanges(mdPath, docxPath, { author });
+
+      if (result.success) {
+        console.log(fmt.status('success', result.message));
+        console.log(chalk.dim(`  ${annotations.length} annotations applied as track changes`));
+      } else {
+        console.error(chalk.red(result.message));
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err.message}`));
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
+// COMMENT command - Interactive comment addition to DOCX
+// ============================================================================
+
+program
+  .command('comment')
+  .description('Add comments to Word document interactively')
+  .argument('<docx>', 'Word document')
+  .option('-a, --author <name>', 'Comment author')
+  .action(async (docxPath, options) => {
+    if (!fs.existsSync(docxPath)) {
+      console.error(chalk.red(`File not found: ${docxPath}`));
+      process.exit(1);
+    }
+
+    const { default: AdmZip } = await import('adm-zip');
+    const rl = (await import('readline')).createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    const ask = (prompt) => new Promise((resolve) => rl.question(prompt, resolve));
+
+    const author = options.author || getUserName() || 'Reviewer';
+
+    console.log(fmt.header('Interactive Comment Mode'));
+    console.log(chalk.dim(`  Document: ${docxPath}`));
+    console.log(chalk.dim(`  Author: ${author}`));
+    console.log(chalk.dim('  Type your comment, then the text to attach it to.'));
+    console.log(chalk.dim('  Enter empty comment to quit.\n'));
+
+    let commentsAdded = 0;
+
+    while (true) {
+      const message = await ask(chalk.cyan('Comment: '));
+
+      if (!message.trim()) {
+        break;
+      }
+
+      const searchText = await ask(chalk.cyan('Attach to text: '));
+
+      // Load document fresh each time
+      const zip = new AdmZip(docxPath);
+      const docEntry = zip.getEntry('word/document.xml');
+
+      if (!docEntry) {
+        console.error(chalk.red('Invalid Word document'));
+        rl.close();
+        process.exit(1);
+      }
+
+      let docXml = zip.readAsText(docEntry);
+
+      // Read or create comments.xml
+      let commentsEntry = zip.getEntry('word/comments.xml');
+      let commentsXml;
+      let nextCommentId = 1;
+
+      if (commentsEntry) {
+        commentsXml = zip.readAsText(commentsEntry);
+        const idMatches = commentsXml.match(/w:id="(\d+)"/g) || [];
+        for (const m of idMatches) {
+          const id = parseInt(m.match(/\d+/)[0]);
+          if (id >= nextCommentId) nextCommentId = id + 1;
+        }
+      } else {
+        commentsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+</w:comments>`;
+      }
+
+      const date = new Date().toISOString();
+      const commentId = nextCommentId;
+
+      // Add comment to comments.xml
+      const newComment = `<w:comment w:id="${commentId}" w:author="${author}" w:date="${date}">
+  <w:p><w:r><w:t>${message}</w:t></w:r></w:p>
+</w:comment>`;
+
+      commentsXml = commentsXml.replace('</w:comments>', `${newComment}\n</w:comments>`);
+
+      // Find text and add comment markers
+      if (searchText.trim()) {
+        const escapedSearch = searchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const textPattern = new RegExp(`(<w:t[^>]*>)([^<]*${escapedSearch}[^<]*)(<\/w:t>)`, 'i');
+
+        if (textPattern.test(docXml)) {
+          docXml = docXml.replace(textPattern, (match, start, text, end) => {
+            return `<w:commentRangeStart w:id="${commentId}"/>${start}${text}${end}<w:commentRangeEnd w:id="${commentId}"/><w:r><w:commentReference w:id="${commentId}"/></w:r>`;
+          });
+          console.log(chalk.green(`  ✓ Comment added at "${searchText}"`));
+        } else {
+          console.log(chalk.yellow(`  Text not found. Comment added without anchor.`));
+        }
+      } else {
+        console.log(chalk.dim(`  Comment added without anchor.`));
+      }
+
+      // Update zip
+      zip.updateFile('word/document.xml', Buffer.from(docXml));
+
+      if (commentsEntry) {
+        zip.updateFile('word/comments.xml', Buffer.from(commentsXml));
+      } else {
+        zip.addFile('word/comments.xml', Buffer.from(commentsXml));
+
+        // Update [Content_Types].xml
+        const ctEntry = zip.getEntry('[Content_Types].xml');
+        if (ctEntry) {
+          let ctXml = zip.readAsText(ctEntry);
+          if (!ctXml.includes('comments.xml')) {
+            ctXml = ctXml.replace('</Types>',
+              '<Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>\n</Types>');
+            zip.updateFile('[Content_Types].xml', Buffer.from(ctXml));
+          }
+        }
+
+        // Update document.xml.rels
+        const relsEntry = zip.getEntry('word/_rels/document.xml.rels');
+        if (relsEntry) {
+          let relsXml = zip.readAsText(relsEntry);
+          if (!relsXml.includes('comments.xml')) {
+            const newRelId = `rId${Date.now()}`;
+            relsXml = relsXml.replace('</Relationships>',
+              `<Relationship Id="${newRelId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/>\n</Relationships>`);
+            zip.updateFile('word/_rels/document.xml.rels', Buffer.from(relsXml));
+          }
+        }
+      }
+
+      zip.writeZip(docxPath);
+      commentsAdded++;
+      console.log();
+    }
+
+    rl.close();
+    console.log();
+
+    if (commentsAdded > 0) {
+      console.log(fmt.status('success', `Added ${commentsAdded} comment(s) to ${docxPath}`));
+    } else {
+      console.log(chalk.dim('No comments added.'));
+    }
+  });
+
 program.parse();

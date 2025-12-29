@@ -2,6 +2,10 @@
 .git
 .gitignore
 .DS_Store
+CLAUDE.md
+
+# CI/CD
+.github/
 
 # Tests
 test/

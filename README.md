@@ -1,6 +1,9 @@
 # docrev
 
 [![npm](https://img.shields.io/npm/v/docrev)](https://www.npmjs.com/package/docrev)
+[![CI](https://github.com/gcol33/docrev/actions/workflows/ci.yml/badge.svg)](https://github.com/gcol33/docrev/actions/workflows/ci.yml)
+[![Node.js](https://img.shields.io/node/v/docrev)](https://nodejs.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 CLI tool for Word ↔ Markdown round-trips. Handle reviewer feedback on academic papers: import track changes, review interactively, manage comments, validate DOIs, and build to PDF/DOCX/LaTeX.
 
@@ -33,6 +36,18 @@ Verify installation:
 ```bash
 rev --version
 rev install    # Check for missing dependencies
+```
+
+### Shell Completions (Optional)
+
+Enable tab completion for `rev` commands:
+
+```bash
+# Bash - add to ~/.bashrc
+eval "$(rev completions bash)"
+
+# Zsh - add to ~/.zshrc
+eval "$(rev completions zsh)"
 ```
 
 ## Features
@@ -196,6 +211,37 @@ rev build docx
 | `rev split <file>` | Split annotated paper.md back to section files |
 | `rev help [topic]` | Show help (topics: workflow, syntax, commands) |
 
+### Convenience Commands
+
+| Command | Description |
+|---------|-------------|
+| `rev word-count` | Show word counts per section |
+| `rev word-count -j <journal>` | Warn if over journal word limit |
+| `rev stats` | Project dashboard (words, figures, citations) |
+| `rev search <query>` | Search across all section files |
+| `rev backup` | Create timestamped backup zip |
+| `rev export` | Export project as distributable zip |
+| `rev preview <format>` | Build and open document |
+| `rev watch [format]` | Auto-rebuild on file changes |
+| `rev lint` | Check for broken refs, missing citations |
+
+### Grammar & Style
+
+| Command | Description |
+|---------|-------------|
+| `rev grammar` | Check grammar/style issues |
+| `rev grammar --rules` | List available grammar rules |
+| `rev grammar --learn <word>` | Add word to custom dictionary |
+| `rev grammar --list` | Show custom dictionary |
+
+### Direct DOCX Editing
+
+| Command | Description |
+|---------|-------------|
+| `rev annotate <docx>` | Add comments to Word document |
+| `rev apply <md> <docx>` | Apply annotations as track changes |
+| `rev comment <docx>` | Interactive comment mode |
+
 ## Project Structure
 
 A typical rev project:
@@ -259,6 +305,27 @@ docx:
 {~~old~>new~~}           # Substitutions
 {>>Author: comment<<}    # Comments
 ```
+
+## Template Variables
+
+Use template variables in section files (processed during build):
+
+```markdown
+Last updated: {{date}}
+Version: {{version}}
+Word count: {{word_count}}
+```
+
+| Variable | Description |
+|----------|-------------|
+| `{{date}}` | Current date (YYYY-MM-DD) |
+| `{{date:MMMM D, YYYY}}` | Custom format (December 29, 2025) |
+| `{{year}}` | Current year |
+| `{{version}}` | Version from rev.yaml |
+| `{{title}}` | Document title |
+| `{{author}}` | First author name |
+| `{{authors}}` | All authors (comma-separated) |
+| `{{word_count}}` | Total word count |
 
 ## Comment Replies
 
