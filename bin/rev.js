@@ -1525,6 +1525,7 @@ program
   .option('--toc', 'Include table of contents')
   .option('--show-changes', 'Export DOCX with visible track changes (audit mode)')
   .option('--dual', 'Output both clean DOCX and DOCX with Word comments (paper.docx + paper_comments.docx)')
+  .option('--reference <docx>', 'Reference DOCX for comment position alignment (use with --dual)')
   .action(async (formats, options) => {
     const dir = path.resolve(options.dir);
 
@@ -1650,28 +1651,84 @@ program
         process.exit(1);
       }
 
-      // Handle --dual mode: create a second DOCX with proper Word comments
+      // Handle --dual mode: create a second DOCX with proper Word comments using marker-based approach
       if (options.dual) {
         const docxResult = results.find(r => r.format === 'docx' && r.success);
         if (docxResult) {
-          const { injectComments } = await import('../lib/wordcomments.js');
+          const { prepareMarkdownWithMarkers, injectCommentsAtMarkers } = await import('../lib/wordcomments.js');
+          const { runPandoc, loadConfig } = await import('../lib/build.js');
 
-          // Read the combined paper.md (with comments still in it)
-          const markdown = fs.readFileSync(paperPath, 'utf-8');
+          // Read the combined paper.md (with comments)
+          let markdown = fs.readFileSync(paperPath, 'utf-8');
 
-          // Generate comments DOCX path
-          const commentsDocxPath = docxResult.outputPath.replace(/\.docx$/, '_comments.docx');
+          // If reference DOCX specified, realign comments from it
+          if (options.reference) {
+            const refPath = path.resolve(dir, options.reference);
+            if (fs.existsSync(refPath)) {
+              const spinRealign = fmt.spinner('Realigning comments from reference...').start();
+              const { realignComments } = await import('../lib/comment-realign.js');
+              // Realign in-memory (don't write to file)
+              const { realignMarkdown } = await import('../lib/comment-realign.js');
+              const realigned = await realignMarkdown(refPath, markdown);
+              if (realigned.success) {
+                markdown = realigned.markdown;
+                spinRealign.stop();
+                console.log(chalk.dim(`  Realigned ${realigned.insertions} comments from reference`));
+              } else {
+                spinRealign.stop();
+                console.log(chalk.yellow(`  Warning: Could not realign comments: ${realigned.error}`));
+              }
+            } else {
+              console.log(chalk.yellow(`  Warning: Reference not found: ${options.reference}`));
+            }
+          }
 
-          const spinComments = fmt.spinner('Injecting Word comments...').start();
-          const commentResult = await injectComments(docxResult.outputPath, markdown, commentsDocxPath);
-          spinComments.stop();
+          // Step 1: Replace comments with markers
+          const spinMarkers = fmt.spinner('Preparing markers...').start();
+          const { markedMarkdown, comments } = prepareMarkdownWithMarkers(markdown);
+          spinMarkers.stop();
 
-          if (commentResult.success) {
-            console.log(chalk.cyan('\nDual output:'));
-            console.log(`  Clean:    ${path.basename(docxResult.outputPath)}`);
-            console.log(`  Comments: ${path.basename(commentsDocxPath)} (${commentResult.commentCount} comments)`);
+          if (comments.length === 0) {
+            console.log(chalk.yellow('\nNo comments found - skipping comments DOCX'));
           } else {
-            console.error(chalk.yellow(`\nWarning: Could not create comments DOCX: ${commentResult.error}`));
+            // Step 2: Write marked markdown to temp file
+            const markedPath = path.join(dir, '.paper-marked.md');
+            fs.writeFileSync(markedPath, markedMarkdown, 'utf-8');
+
+            // Step 3: Build DOCX from marked markdown using pandoc
+            const spinBuild = fmt.spinner('Building marked DOCX...').start();
+            const markedDocxPath = path.join(dir, '.paper-marked.docx');
+            const pandocResult = await runPandoc(markedPath, 'docx', config, { ...options, outputPath: markedDocxPath });
+            spinBuild.stop();
+
+            if (!pandocResult.success) {
+              console.error(chalk.yellow(`\nWarning: Could not build marked DOCX: ${pandocResult.error}`));
+            } else {
+              // Step 4: Replace markers with comment ranges
+              const commentsDocxPath = docxResult.outputPath.replace(/\.docx$/, '_comments.docx');
+              const spinInject = fmt.spinner('Injecting comments at markers...').start();
+              const commentResult = await injectCommentsAtMarkers(markedDocxPath, comments, commentsDocxPath);
+              spinInject.stop();
+
+              // Clean up temp files (keep for debugging if DEBUG env is set)
+              if (!process.env.DEBUG) {
+                try {
+                  fs.unlinkSync(markedPath);
+                  fs.unlinkSync(markedDocxPath);
+                } catch { /* ignore */ }
+              }
+
+              if (commentResult.success) {
+                console.log(chalk.cyan('\nDual output:'));
+                console.log(`  Clean:    ${path.basename(docxResult.outputPath)}`);
+                console.log(`  Comments: ${path.basename(commentsDocxPath)} (${commentResult.commentCount} comments)`);
+                if (commentResult.skippedComments > 0) {
+                  console.log(chalk.yellow(`  Warning: ${commentResult.skippedComments} comments could not be anchored (markers not found)`));
+                }
+              } else {
+                console.error(chalk.yellow(`\nWarning: Could not create comments DOCX: ${commentResult.error}`));
+              }
+            }
           }
         } else {
           console.error(chalk.yellow('\n--dual requires docx format to be built'));
