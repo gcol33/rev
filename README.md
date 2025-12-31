@@ -6,9 +6,11 @@
 
 ## Why
 
-Word documents corrupt. Versions multiply. Track changes become unreadable. Equations break. Figures embed at wrong resolutions.
+Scientific papers go through many revision cycles. You send a Word document to collaborators, they add comments and track changes, you address the feedback and send it back. Then journal submission, reviewer comments, more revisions. After a few rounds, track changes become unreadable, you have fifteen versions of the same file, and nobody knows which one is current. Equations break when copying between documents. Figures get embedded at the wrong resolution or disappear entirely.
 
-docrev solves this: write in Markdown, generate Word/PDF for collaborators. They use Word normally. You get version control, clean diffs, and automated formatting.
+docrev takes a different approach. You write in plain text using Markdown, a simple formatting syntax that takes ten minutes to learn. When you need to share with collaborators or submit to a journal, docrev generates a Word document or PDF. Your collaborators review and comment in Word as usual. When they send it back, docrev imports their feedback into your Markdown files. You address the comments, rebuild the document, and send it back. The cycle continues, but your source files stay clean and under version control.
+
+Your collaborators do not need to install anything or change how they work. They keep using Word. You handle the conversion on your end. The result is proper version history, equations that never break, figures that stay linked rather than embedded, and automated citation formatting.
 
 ```
 Markdown files  -->  docrev  -->  Word/PDF
