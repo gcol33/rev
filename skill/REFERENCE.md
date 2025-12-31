@@ -1,12 +1,27 @@
 # docrev Command Reference
 
+## Project Creation
+
+### rev new
+Create a new document project.
+```bash
+rev new my-document          # Creates my-document/ with section files
+rev new my-document --template apa
+```
+
 ## Document Import/Export
 
 ### rev import
 Import a Word document with track changes and comments.
 ```bash
-rev import --file manuscript.docx
-rev import -f manuscript.docx --output ./project
+rev import manuscript.docx
+rev import manuscript.docx --output ./project
+```
+
+### rev sections
+Import feedback from a reviewed Word document into existing markdown sections.
+```bash
+rev sections reviewed.docx   # Updates markdown with track changes/comments
 ```
 
 ### rev build
@@ -16,7 +31,12 @@ rev build                    # Build PDF and DOCX
 rev build pdf                # PDF only
 rev build docx               # DOCX only
 rev build --toc              # Include table of contents
+rev build --dual             # Clean + annotated versions
 ```
+
+The `--dual` flag produces:
+- `paper.docx` — clean, for submission
+- `paper_comments.docx` — includes comment threads as Word comments
 
 ### rev preview
 Build and open document in default app.
@@ -202,7 +222,7 @@ rev equations list           # List all equations
 rev equations from-word manuscript.docx  # Extract from Word
 ```
 
-## Direct DOCX Editing
+## Direct DOCX Editing (Layout Workflow)
 
 ### rev annotate
 Add comments directly to Word document.
@@ -223,19 +243,6 @@ rev comment paper.docx
 ```
 
 ## Project Management
-
-### rev init
-Initialize a new paper project.
-```bash
-rev init my-paper
-rev init my-paper --template apa
-```
-
-### rev sections
-List and manage section files.
-```bash
-rev sections                 # List all sections
-```
 
 ### rev clean
 Remove generated files.
@@ -276,4 +283,18 @@ Output shell completions.
 ```bash
 eval "$(rev completions bash)"  # Bash
 eval "$(rev completions zsh)"   # Zsh
+```
+
+## AI Skill Installation
+
+### rev install-cli-skill
+Install the docrev skill for AI coding assistants.
+```bash
+rev install-cli-skill        # Install to ~/.claude/skills/docrev
+```
+
+### rev uninstall-cli-skill
+Remove the installed skill.
+```bash
+rev uninstall-cli-skill
 ```

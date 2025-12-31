@@ -6,13 +6,15 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/gcol33/docrev/actions/workflows/ci.yml/badge.svg)](https://github.com/gcol33/docrev/actions/workflows/ci.yml)
 
-Write in Markdown. Collaborate with Word users. Keep everything in git.
+Write in Markdown. Build to Word. Round-trip track changes and comments.
 
 ## Why docrev
 
-Word is where collaboration happens. Your reviewers, co-authors, and editors use track changes and comments. But Word documents are opaque binaries that don't diff, don't merge, and don't version control.
+Write in Markdown with citations, equations, and cross-references. Build to a properly formatted Word document. Most tools only convert Word to Markdown. docrev goes both ways.
 
-docrev bridges this gap:
+Why Markdown? It's plain text: you can use any editor, diff changes line by line, merge branches, grep your manuscript, and keep everything in git. No vendor lock-in, no binary blobs, no corruption.
+
+If your collaborators use Word, you know the problem: they send track changes and comments, but those documents don't diff, don't merge, and don't version control. docrev bridges this gap:
 
 ```
 You write          Collaborators review       You see
@@ -31,8 +33,6 @@ rev sections reviewed.docx   # Word feedback → markdown annotations
 ```
 
 Your markdown files now contain their track changes and comments as inline annotations. Review them in your editor, accept or reject changes, reply to comments, rebuild. All under version control.
-
-**This works for any document**: scientific papers, contracts, reports, proposals, manuals—anything that goes through Word-based review.
 
 ## Install
 
@@ -98,7 +98,7 @@ rev new my-report
 cd my-report
 ```
 
-Replace `my-report` with any name—this creates a folder with that name containing:
+Replace `my-report` with any name. This creates a folder with that name containing:
 
 ```
 my-report/
@@ -116,7 +116,7 @@ Write your content in the markdown files. When ready to share:
 rev build docx
 ```
 
-This produces `my-report.docx`—a properly formatted Word document with your citations resolved, equations rendered, and cross-references numbered.
+This produces `my-report.docx`, a properly formatted Word document with your citations resolved, equations rendered, and cross-references numbered.
 
 ### Starting from an Existing Word Document
 
@@ -134,7 +134,7 @@ docrev supports two distinct approaches depending on your document's complexity:
 
 ### Text Workflow (recommended for most documents)
 
-Best for: papers, reports, proposals—documents where content matters more than layout.
+Best for: papers, reports, proposals, and other documents where content matters more than layout.
 
 ```bash
 rev build docx          # rebuild from markdown each time
@@ -187,9 +187,9 @@ The sample size was {--100--}{++150++} participants.
 Data was collected {~~monthly~>weekly~~} from each site.
 ```
 
-- `{++text++}` — inserted text
-- `{--text--}` — deleted text
-- `{~~old~>new~~}` — substitution
+- `{++text++}` - inserted text
+- `{--text--}` - deleted text
+- `{~~old~>new~~}` - substitution
 
 To accept a change, keep the new text and remove the markup. To reject, keep the old text.
 
@@ -257,8 +257,8 @@ rev build --dual
 ```
 
 Produces:
-- `paper.docx` — clean, for submission
-- `paper_comments.docx` — includes threaded comments visible in Word's comment pane
+- `paper.docx` - clean, for submission
+- `paper_comments.docx` - includes threaded comments visible in Word's comment pane
 
 ### 7. Repeat
 
@@ -360,16 +360,16 @@ The reference `@fig:map` becomes "Figure 1" in output. Numbers update automatica
 
 Full command reference: [docs/commands.md](docs/commands.md)
 
-## Claude Code Integration
+## AI Skill
 
-If you use [Claude Code](https://claude.ai/claude-code), install the docrev skill to teach Claude how to help with your revision workflow:
+Install the docrev skill for AI coding assistants:
 
 ```bash
 rev install-cli-skill      # install skill to ~/.claude/skills/docrev
 rev uninstall-cli-skill    # remove the skill
 ```
 
-Once installed, Claude Code understands docrev commands and can help you navigate comments, draft replies, and manage your revision cycle.
+Once installed, your AI assistant understands docrev commands and can help navigate comments, draft replies, and manage your revision cycle.
 
 ## Requirements
 

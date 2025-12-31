@@ -1,30 +1,66 @@
 ---
 name: docrev
-description: "Academic paper revision workflow tool (CLI: `rev`). Use when working with Word documents containing reviewer comments, importing track changes to markdown, replying to reviewer comments, building PDF/DOCX outputs, generating response letters, validating citations/DOIs, or any academic paper revision task."
+description: "Document revision workflow tool (CLI: `rev`). Use when working with Word documents containing reviewer comments, importing track changes to markdown, replying to reviewer comments, building PDF/DOCX outputs, generating response letters, validating citations/DOIs, or any document revision task."
 ---
 
-# docrev - Academic Paper Revision Tool
+# docrev - Document Revision Tool
 
-`rev` is a CLI tool for academic paper workflows with Word ↔ Markdown round-trips.
+`rev` is a CLI tool for document workflows with Word ↔ Markdown round-trips.
 
-## Core Workflow
+Works for any document that goes through Word-based review: scientific papers, contracts, reports, proposals, manuals.
 
-### 1. Import reviewed Word document
+## Two Workflows
 
-```bash
-rev import --file manuscript-reviewed.docx
-```
+### Text Workflow (most common)
 
-This extracts track changes and comments as CriticMarkup annotations in markdown files.
-
-### 2. View and address comments
+Markdown is the source of truth. Word is for review.
 
 ```bash
-rev comments methods.md              # List all comments with context
-rev status methods.md                # Show annotation counts
+rev build docx               # markdown → Word
+# ... reviewers add comments/track changes ...
+rev sections reviewed.docx   # Word feedback → markdown annotations
 ```
 
-### 3. Reply to reviewer comments
+### Layout Workflow
+
+For documents with complex formatting that must be preserved.
+
+```bash
+rev annotate document.docx -m "Comment" -s "target phrase"
+rev apply changes.md document.docx
+```
+
+## Core Workflow (Text)
+
+### 1. Create or import a project
+
+```bash
+rev new my-document          # Start from scratch
+rev import manuscript.docx   # Start from existing Word doc
+```
+
+### 2. Build and share
+
+```bash
+rev build docx               # Generate Word document
+```
+
+Send to reviewers. They add comments and track changes in Word.
+
+### 3. Import feedback
+
+```bash
+rev sections reviewed.docx   # Updates markdown with annotations
+```
+
+### 4. View and address comments
+
+```bash
+rev comments methods.md      # List all comments with context
+rev status methods.md        # Show annotation counts
+```
+
+### 5. Reply to reviewer comments
 
 **Always use the non-interactive reply mode:**
 
@@ -35,25 +71,25 @@ rev reply results.md -n 3 -m "Updated figure to include 95% CI"
 
 Replies appear as: `{>>Reviewer: Original<<} {>>User: Reply<<}`
 
-### 4. Resolve addressed comments
+### 6. Resolve addressed comments
 
 ```bash
-rev resolve methods.md -n 1          # Mark comment #1 as resolved
+rev resolve methods.md -n 1  # Mark comment #1 as resolved
 ```
 
-### 5. Build output documents
+### 7. Rebuild with comment threads
 
 ```bash
-rev build                            # Build both PDF and DOCX
-rev build docx                       # Word only
-rev build pdf                        # PDF only
-rev build --toc                      # Include table of contents
+rev build --dual             # Produces clean + annotated versions
 ```
 
-### 6. Generate response letter
+- `paper.docx` — clean, for submission
+- `paper_comments.docx` — includes comment threads as Word comments
+
+### 8. Generate response letter
 
 ```bash
-rev response                         # Generate point-by-point response letter
+rev response                 # Generate point-by-point response letter
 ```
 
 ## Annotation Syntax (CriticMarkup)
@@ -68,8 +104,12 @@ rev response                         # Generate point-by-point response letter
 
 | Task | Command |
 |------|---------|
+| Create project | `rev new my-project` |
+| Import Word doc | `rev import manuscript.docx` |
+| Import feedback | `rev sections reviewed.docx` |
+| Build Word | `rev build docx` |
+| Build clean + annotated | `rev build --dual` |
 | Word count per section | `rev word-count` |
-| Word count with limit | `rev word-count --limit 5000` |
 | Project dashboard | `rev stats` |
 | Search all sections | `rev search "query"` |
 | Pre-submission check | `rev check` |
@@ -115,7 +155,7 @@ Available in section files (processed during build):
 ## Project Structure
 
 ```
-my-paper/
+my-document/
 ├── rev.yaml           # Project config
 ├── introduction.md    # Section files with annotations
 ├── methods.md
@@ -128,15 +168,16 @@ my-paper/
 
 ## When Helping Users
 
-1. **Import phase**: Run `rev import` to get track changes as markdown
-2. **Review phase**: Use `rev comments` to see all comments, then `rev reply` to respond
-3. **Build phase**: Run `rev build docx` to generate the updated Word document
-4. **Validation phase**: Run `rev check` before submission (lint + grammar + citations)
-5. **Response letter**: Use `rev response` to generate point-by-point responses
+1. **Setup**: Ensure `rev config user "Name"` is set for replies
+2. **Import phase**: Run `rev import` or `rev sections` to get feedback as markdown
+3. **Review phase**: Use `rev comments` to see all comments, then `rev reply` to respond
+4. **Build phase**: Run `rev build docx` or `rev build --dual` for annotated version
+5. **Validation phase**: Run `rev check` before submission (lint + grammar + citations)
+6. **Response letter**: Use `rev response` to generate point-by-point responses
 
 ## Critical: Ask Questions When Unsure
 
-When addressing reviewer comments or editing scientific papers:
+When addressing reviewer comments or editing documents:
 
 - **Never guess methods or numbers** - If a comment asks for clarification about methodology, sample sizes, statistical parameters, dates, or any quantitative information, ASK the user rather than inventing values
 - **Placeholders are acceptable** - Use `[???]` or `[TODO: specify X]` when information is missing rather than fabricating data
