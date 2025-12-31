@@ -6,16 +6,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/gcol33/docrev/actions/workflows/ci.yml/badge.svg)](https://github.com/gcol33/docrev/actions/workflows/ci.yml)
 
-Write scientific papers in Markdown. Generate Word documents for collaborators. Import their feedback. Repeat.
+A CLI for writing scientific papers in Markdown while collaborating with Word users.
 
-```
-Markdown  ──►  docrev  ──►  Word/PDF  ──►  Collaborators
-    ▲                                           │
-    └───────────  docrev  ◄─────────────────────┘
-                (import feedback)
-```
-
-Scientific papers go through many revision cycles with collaborators and reviewers. Track changes become unreadable, versions multiply, equations break when copying, figures get embedded at wrong resolutions. docrev keeps your source in plain Markdown under version control while generating Word documents for the review cycle. Your collaborators keep using Word as usual. You handle conversion on your end.
+You write in Markdown under version control. Your collaborators use Word. docrev converts between the two, preserving track changes, comments, equations, and cross-references.
 
 ## Install
 
@@ -24,20 +17,20 @@ npm install -g docrev
 brew install pandoc
 ```
 
-## Start a Project
+Pandoc is required for document conversion. On Windows use `winget install JohnMacFarlane.Pandoc`, on Linux use `apt install pandoc`.
 
-From scratch:
-```bash
-rev new my-paper
-cd my-paper
-```
+## Getting Started
 
-From existing Word document:
+### Starting from a Word Document
+
+If you have an existing manuscript in Word:
+
 ```bash
 rev import manuscript.docx
 ```
 
-Project structure:
+This converts your document to markdown, splitting it into sections:
+
 ```
 my-paper/
 ├── introduction.md
@@ -48,130 +41,211 @@ my-paper/
 └── rev.yaml
 ```
 
-## Markdown Basics
+Track changes and comments from the Word document are preserved as annotations in the markdown files (see below).
+
+### Starting from Scratch
+
+To start a new paper in markdown:
+
+```bash
+rev new my-paper
+cd my-paper
+```
+
+This creates the same project structure with empty section files. Write your paper in the markdown files, then build Word documents to share with collaborators.
+
+## The Revision Cycle
+
+### 1. Build and Share
+
+Generate a Word document from your markdown:
+
+```bash
+rev build docx
+```
+
+Send this to your collaborators. They review it in Word, adding comments and track changes as usual.
+
+### 2. Import Feedback
+
+When collaborators return the reviewed document, import their feedback:
+
+```bash
+rev sections reviewed.docx
+```
+
+This updates your markdown files with their comments and track changes, converted to inline annotations.
+
+### 3. Review Track Changes
+
+Track changes appear as inline annotations in your markdown:
 
 ```markdown
-# Heading
-
-Paragraph text. **Bold** and *italic*.
-
-- Bullet point
-- Another point
-
-1. Numbered item
-2. Second item
+The sample size was {--100--}{++150++} individuals.
+We collected data {~~monthly~>weekly~~} from each site.
 ```
+
+- `{++text++}` — inserted text
+- `{--text--}` — deleted text
+- `{~~old~>new~~}` — substitution
+
+To accept a change, keep the new text and delete the markup. To reject it, keep the old text. When you're done, the file is clean markdown.
+
+### 4. Respond to Comments
+
+Comments appear inline in your markdown:
+
+```markdown
+We used a random sampling approach.
+{>>Reviewer 2: Please clarify the sampling method.<<}
+```
+
+List all comments in a file:
+
+```bash
+rev comments methods.md
+```
+
+Reply from the command line:
+
+```bash
+rev config user "Your Name"    # one-time setup
+rev reply methods.md -n 1 -m "Added clarification in paragraph 2"
+```
+
+Your reply threads beneath the original:
+
+```markdown
+We used a random sampling approach.
+{>>Reviewer 2: Please clarify the sampling method.<<}
+{>>Your Name: Added clarification in paragraph 2.<<}
+```
+
+Mark comments as resolved:
+
+```bash
+rev resolve methods.md -n 1
+```
+
+### 5. Rebuild with Comment Threads
+
+Generate both a clean version and one showing the comment threads:
+
+```bash
+rev build --dual
+```
+
+This produces:
+- `paper.docx` — clean, for submission
+- `paper_comments.docx` — includes comment threads as Word comments
+
+Your collaborators see the full conversation in the comments pane.
+
+### 6. Repeat
+
+Send the updated Word document. Import new feedback with `rev sections`. Continue until done.
+
+## Before Submission
+
+### Validate Your Bibliography
+
+Check that DOIs in your bibliography resolve correctly:
+
+```bash
+rev doi check references.bib
+```
+
+Find DOIs for entries missing them:
+
+```bash
+rev doi lookup references.bib
+```
+
+Add a citation directly from a DOI:
+
+```bash
+rev doi add 10.1038/s41586-020-2649-2
+```
+
+### Run Pre-Submission Checks
+
+Check for broken references, missing citations, and common issues:
+
+```bash
+rev check
+```
+
+## Writing in Markdown
 
 ### Citations
 
-references.bib:
+Add references to `references.bib`:
+
 ```bibtex
 @article{Smith2020,
   author = {Smith, Jane},
   title = {Paper Title},
   journal = {Nature},
-  year = {2020}
+  year = {2020},
+  doi = {10.1038/example}
 }
 ```
 
-In text:
-```markdown
-Previous studies [@Smith2020] demonstrated this.
-```
+Cite in text:
 
-Output: "Previous studies (Smith 2020) demonstrated this."
+```markdown
+Previous work [@Smith2020] established this relationship.
+Multiple sources support this [@Smith2020; @Jones2021].
+```
 
 ### Equations
 
-Inline: `$E = mc^2$`
+Inline equations use single dollar signs: `$E = mc^2$`
 
-Display:
+Display equations use double dollar signs:
+
 ```markdown
 $$
-\hat{p} = \frac{\sum_d w_d p_d}{\sum_d w_d}
+\bar{x} = \frac{1}{n} \sum_{i=1}^{n} x_i
 $$
 ```
 
-### Figures
+### Figures and Cross-References
 
 ```markdown
 ![Study site locations](figures/map.png){#fig:map}
 
-Results shown in @fig:map indicate regional variation.
+Results are shown in @fig:map.
 ```
 
-Output: "Results shown in Figure 1 indicate regional variation."
+The reference `@fig:map` becomes "Figure 1" in the output. Numbers update automatically when figures are reordered.
 
-Figure numbers update automatically when reordered.
+Tables and equations work the same way with `@tbl:label` and `@eq:label`.
 
-## Build
-
-```bash
-rev build docx          # Word document
-rev build pdf           # PDF
-rev build --dual        # Clean + comments versions
-rev watch docx          # Auto-rebuild on save
-```
-
-## Handle Reviewer Feedback
-
-Import reviewed document:
-```bash
-rev sections reviewed.docx
-```
-
-View comments:
-```bash
-rev comments methods.md
-```
-
-Reply to comment:
-```bash
-rev config user "Your Name"
-rev reply methods.md -n 1 -m "Clarified sampling methodology"
-```
-
-Rebuild with threaded comments:
-```bash
-rev build --dual
-```
-
-Output:
-- `paper.docx` (clean)
-- `paper_comments.docx` (with comment threads)
-
-## Commands
+## Useful Commands
 
 | Task | Command |
 |------|---------|
-| New project | `rev new my-paper` |
-| Import Word | `rev import manuscript.docx` |
+| Start new project | `rev new my-paper` |
+| Import Word document | `rev import manuscript.docx` |
+| Import feedback | `rev sections reviewed.docx` |
+| List comments | `rev comments methods.md` |
+| Reply to comment | `rev reply methods.md -n 1 -m "response"` |
 | Build Word | `rev build docx` |
 | Build PDF | `rev build pdf` |
-| Import feedback | `rev sections reviewed.docx` |
-| View comments | `rev comments methods.md` |
-| Reply to comment | `rev reply methods.md -n 1 -m "text"` |
+| Build both clean and annotated | `rev build --dual` |
+| Check DOIs | `rev doi check references.bib` |
+| Find missing DOIs | `rev doi lookup references.bib` |
 | Word count | `rev word-count` |
-| Validate DOIs | `rev doi check` |
-| Pre-submit check | `rev check` |
+| Pre-submission check | `rev check` |
+| Watch for changes | `rev watch docx` |
 
-Full reference: [docs/commands.md](docs/commands.md)
+Full command reference: [docs/commands.md](docs/commands.md)
 
 ## Requirements
 
 - Node.js 18+
-- Pandoc
-
-```bash
-# macOS
-brew install pandoc
-
-# Windows
-winget install JohnMacFarlane.Pandoc
-
-# Linux
-sudo apt install pandoc
-```
+- Pandoc 2.11+
 
 ## License
 
