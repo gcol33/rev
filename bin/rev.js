@@ -1683,7 +1683,11 @@ program
             }
           }
 
-          // Step 1: Replace comments with markers
+          // Step 1: Strip track changes but keep comments for Word conversion
+          // This applies {++insertions++}, removes {--deletions--}, keeps {>>comments<<}
+          markdown = stripAnnotations(markdown, { keepComments: true });
+
+          // Step 2: Replace comments with markers
           const spinMarkers = fmt.spinner('Preparing markers...').start();
           const { markedMarkdown, comments } = prepareMarkdownWithMarkers(markdown);
           spinMarkers.stop();
@@ -1691,11 +1695,11 @@ program
           if (comments.length === 0) {
             console.log(chalk.yellow('\nNo comments found - skipping comments DOCX'));
           } else {
-            // Step 2: Write marked markdown to temp file
+            // Step 3: Write marked markdown to temp file
             const markedPath = path.join(dir, '.paper-marked.md');
             fs.writeFileSync(markedPath, markedMarkdown, 'utf-8');
 
-            // Step 3: Build DOCX from marked markdown using pandoc
+            // Step 4: Build DOCX from marked markdown using pandoc
             const spinBuild = fmt.spinner('Building marked DOCX...').start();
             const markedDocxPath = path.join(dir, '.paper-marked.docx');
             const pandocResult = await runPandoc(markedPath, 'docx', config, { ...options, outputPath: markedDocxPath });
@@ -1704,7 +1708,7 @@ program
             if (!pandocResult.success) {
               console.error(chalk.yellow(`\nWarning: Could not build marked DOCX: ${pandocResult.error}`));
             } else {
-              // Step 4: Replace markers with comment ranges
+              // Step 5: Replace markers with comment ranges
               const commentsDocxPath = docxResult.outputPath.replace(/\.docx$/, '_comments.docx');
               const spinInject = fmt.spinner('Injecting comments at markers...').start();
               const commentResult = await injectCommentsAtMarkers(markedDocxPath, comments, commentsDocxPath);
