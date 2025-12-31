@@ -130,33 +130,23 @@ rev import manuscript.docx
 
 This creates a project folder and splits the document into section files. Any existing track changes and comments are preserved as markdown annotations.
 
-## Two Workflows: Layout vs Text
+## Content and Layout, Separated
 
-docrev supports two distinct approaches depending on your document's complexity:
+In Markdown, you focus on content. Write your text, add citations with `[@key]`, insert equations with `$...$`, reference figures with `@fig:label`. No fiddling with fonts, margins, or styles.
 
-### Text Workflow (recommended for most documents)
+Layout is controlled separately in `rev.yaml`:
 
-Best for: papers, reports, proposals, and other documents where content matters more than layout.
-
-```bash
-rev build docx          # rebuild from markdown each time
-rev sections feedback.docx   # import feedback into markdown
+```yaml
+title: "My Document"
+output:
+  docx:
+    reference-doc: template.docx   # your Word template
+  pdf:
+    documentclass: article
+    fontsize: 12pt
 ```
 
-You maintain markdown as the source of truth. Word is just for review.
-
-### Layout Workflow
-
-Best for: documents with complex formatting, embedded objects, or layouts that Pandoc can't reproduce.
-
-```bash
-rev annotate document.docx -m "Comment text" -s "target phrase"
-rev apply changes.md document.docx
-```
-
-You work directly with the Word file, adding comments and applying tracked changes without round-tripping through markdown.
-
-Most users should start with the text workflow. Use layout workflow only when you need pixel-perfect Word formatting that must be preserved.
+Change the template, rebuild, and every document gets the new formatting. Your content stays clean.
 
 ## The Revision Cycle
 
@@ -359,6 +349,8 @@ The reference `@fig:map` becomes "Figure 1" in output. Numbers update automatica
 | Word count | `rev word-count` |
 | Pre-submission check | `rev check` |
 | Watch for changes | `rev watch docx` |
+
+Run `rev help` to see all commands, or `rev help <command>` for details on a specific command.
 
 Full command reference: [docs/commands.md](docs/commands.md)
 

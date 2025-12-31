@@ -9,28 +9,22 @@ description: "Document revision workflow tool (CLI: `rev`). Use when working wit
 
 Works for any document that goes through Word-based review: scientific papers, contracts, reports, proposals, manuals.
 
-## Two Workflows
+## Content and Layout, Separated
 
-### Text Workflow (most common)
+In Markdown, you focus on content. Write text, add citations with `[@key]`, insert equations with `$...$`, reference figures with `@fig:label`. No fiddling with fonts or styles.
 
-Markdown is the source of truth. Word is for review.
+Layout is controlled in `rev.yaml`:
 
-```bash
-rev build docx               # markdown → Word
-# ... reviewers add comments/track changes ...
-rev sections reviewed.docx   # Word feedback → markdown annotations
+```yaml
+title: "My Document"
+output:
+  docx:
+    reference-doc: template.docx
 ```
 
-### Layout Workflow
+Change the template, rebuild, and every document gets the new formatting.
 
-For documents with complex formatting that must be preserved.
-
-```bash
-rev annotate document.docx -m "Comment" -s "target phrase"
-rev apply changes.md document.docx
-```
-
-## Core Workflow (Text)
+## Core Workflow
 
 ### 1. Create or import a project
 
