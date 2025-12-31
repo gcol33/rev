@@ -1,59 +1,138 @@
-# Reviewer Workflow Guide
+# Complete Workflow Guide
 
-Step-by-step guide for handling reviewer feedback.
+The Word ↔ Markdown round-trip workflow for academic papers.
 
-## 1. Receive Reviewed Document
+## The Big Picture
 
-When you receive a Word document with track changes and comments:
-
-```bash
-cd my-paper
-
-# Import to section files (recommended)
-rev sections reviewed.docx
-
-# Or import to single file
-rev import reviewed.docx paper.md
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│   Word Doc ──────► Markdown ──────► Word/PDF                    │
+│      │               │                 │                        │
+│      │          (you work here)        │                        │
+│      │               │                 ▼                        │
+│      │               │            Send to reviewers             │
+│      │               │                 │                        │
+│      │               │                 ▼                        │
+│      │               │            Receive feedback              │
+│      └───────────────┴─────────────────┘                        │
+│                      │                                          │
+│                   (repeat)                                      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-**What happens:**
-- Track changes become CriticMarkup annotations
-- Comments are extracted with author names
-- Equations are converted to LaTeX
-- Images are extracted to `media/`
+**Key insight:** You always work in Markdown. Word is just for delivery and collecting feedback.
 
-## 2. Review Track Changes
+---
 
-Go through each change interactively:
+## Phase 1: Start Your Project
 
+### Option A: Import from existing Word doc
+
+```bash
+rev import manuscript.docx
+```
+
+This creates:
+```
+my-paper/
+├── rev.yaml           # Project config
+├── introduction.md    # Section files (auto-detected)
+├── methods.md
+├── results.md
+├── discussion.md
+├── references.bib     # If citations found
+└── figures/           # Extracted images
+```
+
+### Option B: Start fresh
+
+```bash
+rev new my-paper
+cd my-paper
+```
+
+Edit the generated section files.
+
+---
+
+## Phase 2: Work in Markdown
+
+Edit your section files using any text editor. The Markdown supports:
+
+**Citations:**
+```markdown
+Previous studies [@Smith2020; @Jones2021] have shown...
+```
+
+**Figures with cross-refs:**
+```markdown
+![Caption text](figures/heatmap.png){#fig:heatmap}
+
+See @fig:heatmap for the results.
+```
+
+**Equations:**
+```markdown
+The model is defined as $y = mx + b$ where...
+
+$$
+\hat{p} = \frac{\sum_d w_d p_d}{\sum_d w_d}
+$$
+```
+
+---
+
+## Phase 3: Build & Deliver
+
+### Build for collaborators
+
+```bash
+rev build docx           # Standard Word doc
+rev build --dual         # Clean + comments versions
+rev build pdf            # PDF for submission
+```
+
+**Dual output creates:**
+- `paper.docx` - Clean document for reading
+- `paper_comments.docx` - With threaded Word comments for discussion
+
+### Preview while writing
+
+```bash
+rev preview docx         # Build and open
+rev watch docx           # Auto-rebuild on save
+```
+
+---
+
+## Phase 4: Receive Reviewer Feedback
+
+When reviewers return a Word doc with track changes and comments:
+
+### Import to section files
+
+```bash
+rev sections reviewed.docx
+```
+
+This:
+- Extracts track changes → CriticMarkup annotations
+- Extracts comments with author names
+- Converts equations (OMML → LaTeX)
+- Extracts images to `media/`
+
+### Review track changes
+
+Interactive TUI:
 ```bash
 rev review methods.md
 ```
 
-**TUI controls:**
-- `a` - Accept change
-- `r` - Reject change
-- `s` - Skip for now
-- `q` - Quit and save
+Controls: `a` accept, `r` reject, `s` skip, `q` quit
 
-Or see all annotations:
-
-```bash
-rev status methods.md
-```
-
-Output:
-```
-methods.md:
-  Insertions:    12
-  Deletions:     5
-  Substitutions: 8
-  Comments:      15
-```
-
-## 3. Address Comments
-
-List all comments with context:
+### See all comments
 
 ```bash
 rev comments methods.md
@@ -63,131 +142,106 @@ Output:
 ```
 #1 [Guy Colling] line 45
    "explain what you mean here"
-   Context: ...This coarse classification obscured substantial within-group heterogeneity...
+   Context: ...This classification obscured substantial heterogeneity...
 
 #2 [Guy Colling] line 67
-   "add citation"
-   Context: ...as documented in previous studies...
+   "add citation needed"
 ```
 
-### Reply to Comments
+---
 
-Set your name (once):
+## Phase 5: Reply to Comments
+
+### Set your name (once)
+
 ```bash
-rev config user "Gilles Colling"
+rev config user "Your Name"
 ```
 
-Reply to specific comment:
+### Reply to specific comment
+
 ```bash
-rev reply methods.md -n 1 -m "Clarified: heterogeneity within habitat groups."
+rev reply methods.md -n 1 -m "Clarified in revised text."
 ```
 
-Or go through interactively:
+### Interactive replies
+
 ```bash
 rev reply methods.md
 ```
 
 **Result in markdown:**
 ```markdown
-{>>Guy Colling: explain what you mean here<<} {>>Gilles Colling: Clarified: heterogeneity within habitat groups.<<}
+{>>Guy Colling: explain what you mean here<<} {>>Your Name: Clarified in revised text.<<}
 ```
 
-### Resolve Comments
+---
 
-Mark as resolved (adds [RESOLVED] tag):
-```bash
-rev resolve methods.md -n 1
-```
+## Phase 6: Rebuild & Send Back
 
-## 4. Rebuild Document
-
-Generate updated Word document:
+### Rebuild with threaded comments
 
 ```bash
-# Clean version (annotations applied)
-rev build docx
-
-# Dual output: clean + with threaded comments
 rev build --dual
 ```
 
-**Dual output creates:**
-- `paper.docx` - Clean document
-- `paper_comments.docx` - With threaded Word comments
+The `paper_comments.docx` will have your replies threaded under the original comments - just like a conversation in Word.
 
-### Comment Threading
-
-Adjacent comments from different authors become threaded:
-```markdown
-{>>Guy Colling: Question?<<} {>>Gilles Colling: Answer.<<}
-```
-
-In Word, "Answer" appears as a reply to "Question" in the same thread.
-
-## 5. Generate Response Letter
-
-Create point-by-point response to reviewers:
+### Generate response letter
 
 ```bash
-rev response
+rev response > response-to-reviewers.md
 ```
 
-Output:
-```markdown
-# Response to Reviewers
+Creates a point-by-point response document.
 
-## Reviewer 1 (Guy Colling)
+---
 
-### Comment 1 (methods.md, line 45)
-> explain what you mean here
+## Phase 7: Repeat
 
-**Response:** Clarified: heterogeneity within habitat groups.
+The cycle continues:
+1. Receive more feedback → `rev sections reviewed_v2.docx`
+2. Review and reply
+3. Rebuild → `rev build --dual`
+4. Send back
 
-### Comment 2 (methods.md, line 67)
-...
-```
+**Your markdown files remain the source of truth.** Word is just the exchange format.
 
-## 6. Pre-Submission Check
+---
 
-Before submitting:
+## Quick Reference
 
-```bash
-# Full check
-rev check
+| Task | Command |
+|------|---------|
+| Start from Word | `rev import manuscript.docx` |
+| Start fresh | `rev new my-paper` |
+| Build Word | `rev build docx` |
+| Build with comments | `rev build --dual` |
+| Build PDF | `rev build pdf` |
+| Import feedback | `rev sections reviewed.docx` |
+| Review changes | `rev review methods.md` |
+| See comments | `rev comments methods.md` |
+| Reply to comment | `rev reply methods.md -n 1 -m "..."` |
+| Response letter | `rev response` |
+| Pre-submit check | `rev check` |
 
-# Individual checks
-rev lint                    # Broken refs, missing citations
-rev doi check               # Validate DOIs
-rev validate -j nature      # Journal requirements
-rev word-count -j nature    # Word limit
-```
+---
 
 ## Tips
 
-### Export Comments to CSV
+### Backup before major changes
+```bash
+rev backup --name "before-revision-2"
+```
 
-For tracking in spreadsheet:
+### Validate before submission
+```bash
+rev check                    # Full check
+rev doi check               # Validate DOIs
+rev validate -j nature      # Journal requirements
+```
+
+### Export comments for tracking
 ```bash
 rev comments methods.md --export comments.csv
-```
-
-### Search Across Files
-
-Find all mentions of a term:
-```bash
-rev search "habitat"
-rev search -i "EUNIS"  # Case-insensitive
-```
-
-### Backup Before Major Changes
-
-```bash
-rev backup --name "before-revision"
-```
-
-### Watch for Changes
-
-Auto-rebuild while editing:
-```bash
-rev watch docx
 ```
