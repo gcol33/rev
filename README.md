@@ -348,6 +348,7 @@ The reference `@fig:map` becomes "Figure 1" in output. Numbers update automatica
 | Task | Command |
 |------|---------|
 | Create project | `rev new my-project` |
+| Create LaTeX project | `rev new my-project --template latex` |
 | Import Word document | `rev import manuscript.docx` |
 | Build DOCX | `rev build docx` |
 | Build PDF | `rev build pdf` |
@@ -355,17 +356,23 @@ The reference `@fig:map` becomes "Figure 1" in output. Numbers update automatica
 | Sync Word feedback | `rev sync reviewed.docx` |
 | Sync PDF comments | `rev sync annotated.pdf` |
 | Extract PDF comments | `rev pdf-comments annotated.pdf` |
+| Extract with highlighted text | `rev pdf-comments file.pdf --with-text` |
 | Project status | `rev status` |
 | Next pending comment | `rev next` |
 | List pending comments | `rev todo` |
+| Filter by author | `rev comments file.md --author "Reviewer 2"` |
 | Accept all changes | `rev accept file.md -a` |
 | Reject change | `rev reject file.md -n 1` |
 | Reply to comment | `rev reply file.md -n 1 -m "response"` |
+| Reply to all pending | `rev reply file.md --all -m "Addressed"` |
 | Resolve comment | `rev resolve file.md -n 1` |
+| Show contributors | `rev contributors` |
+| Lookup ORCID | `rev orcid 0000-0002-1825-0097` |
 | Archive reviewer files | `rev archive` |
 | Check DOIs | `rev doi check references.bib` |
 | Word count | `rev wc` |
 | Pre-submission check | `rev check` |
+| Check for updates | `rev upgrade --check` |
 
 Run `rev help` to see all commands, or `rev help <command>` for details on a specific command.
 

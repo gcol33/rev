@@ -108,19 +108,25 @@ rev response                 # Generate point-by-point response letter
 | Task | Command |
 |------|---------|
 | Create project | `rev new my-project` |
+| Create LaTeX project | `rev new my-project --template latex` |
 | Import Word doc | `rev import manuscript.docx` |
 | Sync Word feedback | `rev sync reviewed.docx` |
 | Sync PDF comments | `rev sync annotated.pdf` |
 | Extract PDF comments | `rev pdf-comments annotated.pdf` |
+| Extract with highlighted text | `rev pdf-comments file.pdf --with-text` |
 | Append PDF comments | `rev pdf-comments annotated.pdf --append methods.md` |
 | Project status | `rev status` |
 | Next pending | `rev next` |
 | List pending | `rev todo` |
+| Filter by author | `rev comments file.md --author "Reviewer 2"` |
+| Reply to all pending | `rev reply file.md --all -m "Addressed"` |
 | Accept all changes | `rev accept file.md -a` |
 | Build Word | `rev build docx` |
 | Build PDF | `rev build pdf` |
 | Build clean + annotated Word | `rev build docx --dual` |
 | Build clean + annotated PDF | `rev build pdf --dual` |
+| Show contributors | `rev contributors` |
+| Lookup ORCID | `rev orcid 0000-0002-1825-0097` |
 | Archive reviewer files | `rev archive` |
 | Word count per section | `rev word-count` |
 | Project dashboard | `rev stats` |
@@ -131,6 +137,7 @@ rev response                 # Generate point-by-point response letter
 | Check spelling | `rev spelling` |
 | Open PDF preview | `rev preview pdf` |
 | Auto-rebuild on changes | `rev watch` |
+| Check for updates | `rev upgrade --check` |
 
 ## DOI Management
 

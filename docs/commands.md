@@ -219,4 +219,32 @@ eval "$(rev completions bash)"
 
 # Zsh - add to ~/.zshrc
 eval "$(rev completions zsh)"
+
+# PowerShell - add to $PROFILE
+Invoke-Expression (rev completions powershell | Out-String)
 ```
+
+## Collaboration & Git
+
+| Command | Description |
+|---------|-------------|
+| `rev contributors` | Show author contributions across all sections |
+| `rev contributors <file>` | Show who wrote what in a specific file |
+| `rev contributors <file> --blame` | Line-by-line blame output |
+| `rev history` | Show revision history |
+| `rev diff` | Compare sections against git history |
+
+## ORCID Integration
+
+| Command | Description |
+|---------|-------------|
+| `rev orcid <id>` | Fetch author info from ORCID |
+| `rev orcid <id> --yaml` | Output as YAML for rev.yaml authors |
+| `rev orcid <id> --badge` | Generate markdown badge |
+
+## Self-Update
+
+| Command | Description |
+|---------|-------------|
+| `rev upgrade` | Update docrev to latest version |
+| `rev upgrade --check` | Check for updates without installing |
