@@ -51,10 +51,82 @@ import { validateCitations, getCitationStats } from '../lib/citations.js';
 import { extractEquations, getEquationStats, createEquationsDoc, extractEquationsFromWord, getWordEquationStats } from '../lib/equations.js';
 import { parseBibEntries, checkBibDois, fetchBibtex, addToBib, isValidDoiFormat, lookupDoi, lookupMissingDois } from '../lib/doi.js';
 
+// Helper to find files by extension (replaces glob.sync)
+function findFiles(ext, cwd = process.cwd()) {
+  try {
+    return fs.readdirSync(cwd)
+      .filter(f => f.endsWith(ext) && !f.startsWith('.'));
+  } catch {
+    return [];
+  }
+}
+
+// Global flags
+let quietMode = false;
+let jsonMode = false;
+
+// JSON output helper
+function jsonOutput(data) {
+  console.log(JSON.stringify(data, null, 2));
+}
+
+// Levenshtein distance for command suggestions
+function levenshtein(a, b) {
+  const matrix = Array(b.length + 1).fill(null).map(() => Array(a.length + 1).fill(null));
+  for (let i = 0; i <= a.length; i++) matrix[0][i] = i;
+  for (let j = 0; j <= b.length; j++) matrix[j][0] = j;
+  for (let j = 1; j <= b.length; j++) {
+    for (let i = 1; i <= a.length; i++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[j][i] = Math.min(
+        matrix[j][i - 1] + 1,
+        matrix[j - 1][i] + 1,
+        matrix[j - 1][i - 1] + cost
+      );
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+// Find similar commands for typo suggestions
+function suggestCommand(input, commands) {
+  const suggestions = commands
+    .map(cmd => ({ cmd, dist: levenshtein(input.toLowerCase(), cmd.toLowerCase()) }))
+    .filter(({ dist }) => dist <= 3)
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, 3)
+    .map(({ cmd }) => cmd);
+  return suggestions;
+}
+
+// Read version from package.json
+const pkgPath = new URL('../package.json', import.meta.url);
+const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+
 program
   .name('rev')
   .description('Revision workflow for Word ↔ Markdown round-trips')
-  .version('0.2.0');
+  .version(`${pkg.version}\nNode ${process.version} | ${process.platform} ${process.arch}`, '-V, --version', 'Output version information')
+  .configureOutput({
+    outputError: (str, write) => write(chalk.red(str)),
+  })
+  .showHelpAfterError(chalk.dim('(use --help for usage information)'))
+  .option('--no-color', 'Disable colored output')
+  .option('-q, --quiet', 'Suppress non-essential output')
+  .option('--json', 'Output in JSON format (for scripting)')
+  .hook('preAction', (thisCommand) => {
+    const opts = thisCommand.opts();
+    if (opts.color === false) {
+      chalk.level = 0;
+    }
+    if (opts.quiet) {
+      quietMode = true;
+    }
+    if (opts.json) {
+      jsonMode = true;
+      chalk.level = 0; // Disable colors in JSON mode
+    }
+  });
 
 // ============================================================================
 // REVIEW command - Interactive track change review
@@ -126,18 +198,38 @@ program
 
 program
   .command('status')
+  .alias('s')
   .description('Show project overview or file annotation statistics')
   .argument('[file]', 'Markdown file to analyze (default: project overview)')
   .action(async (file) => {
     // If a specific file is given, show its annotations
     if (file) {
       if (!fs.existsSync(file)) {
-        console.error(chalk.red(`Error: File not found: ${file}`));
+        if (jsonMode) {
+          jsonOutput({ error: `File not found: ${file}` });
+        } else {
+          console.error(chalk.red(`Error: File not found: ${file}`));
+        }
         process.exit(1);
       }
 
       const text = fs.readFileSync(file, 'utf-8');
       const counts = countAnnotations(text);
+      const comments = getComments(text);
+
+      if (jsonMode) {
+        jsonOutput({
+          file: path.basename(file),
+          annotations: counts,
+          comments: comments.map(c => ({
+            author: c.author || null,
+            content: c.content,
+            line: c.line,
+            resolved: c.resolved || false,
+          })),
+        });
+        return;
+      }
 
       if (counts.total === 0) {
         console.log(fmt.status('success', 'No annotations found.'));
@@ -158,7 +250,6 @@ program
       console.log(fmt.table(['', 'Type', 'Count'], rows, { align: ['center', 'left', 'right'] }));
 
       // List comments with authors in a table
-      const comments = getComments(text);
       if (comments.length > 0) {
         console.log();
         console.log(fmt.header('Comments'));
@@ -179,13 +270,14 @@ program
     }
 
     // Project overview mode
-    console.log(fmt.header('Project Status'));
-    console.log();
-
     // Find all markdown files
-    const mdFiles = glob.sync('*.md', { cwd: process.cwd() });
+    const mdFiles = findFiles('.md');
     if (mdFiles.length === 0) {
-      console.log(fmt.status('warning', 'No markdown files found in current directory.'));
+      if (jsonMode) {
+        jsonOutput({ error: 'No markdown files found', files: [] });
+      } else {
+        console.log(fmt.status('warning', 'No markdown files found in current directory.'));
+      }
       return;
     }
 
@@ -198,8 +290,8 @@ program
     let totalSubstitutes = 0;
     const fileStats = [];
 
-    for (const file of mdFiles) {
-      const text = fs.readFileSync(file, 'utf-8');
+    for (const f of mdFiles) {
+      const text = fs.readFileSync(f, 'utf-8');
       const counts = countAnnotations(text);
       const comments = getComments(text);
       const pending = comments.filter(c => !c.resolved).length;
@@ -217,16 +309,45 @@ program
 
       if (counts.total > 0 || words > 0) {
         fileStats.push({
-          file,
+          file: f,
           words,
           inserts: counts.inserts,
           deletes: counts.deletes,
-          subs: counts.substitutes,
+          substitutions: counts.substitutes,
           comments: comments.length,
           pending,
         });
       }
     }
+
+    // JSON output
+    if (jsonMode) {
+      const docxFiles = findFiles('.docx');
+      const latestDocx = docxFiles.length > 0
+        ? docxFiles
+            .map(f => ({ name: f, mtime: fs.statSync(f).mtime }))
+            .sort((a, b) => b.mtime - a.mtime)[0]
+        : null;
+
+      jsonOutput({
+        summary: {
+          words: totalWords,
+          files: mdFiles.length,
+          comments: totalComments,
+          pendingComments,
+          insertions: totalInserts,
+          deletions: totalDeletes,
+          substitutions: totalSubstitutes,
+        },
+        files: fileStats,
+        latestDocx: latestDocx ? { name: latestDocx.name, mtime: latestDocx.mtime.toISOString() } : null,
+      });
+      return;
+    }
+
+    // Normal output
+    console.log(fmt.header('Project Status'));
+    console.log();
 
     // Summary
     console.log(`  ${chalk.bold(totalWords.toLocaleString())} words across ${mdFiles.length} files`);
@@ -244,13 +365,13 @@ program
     if (totalChanges > 0 || totalComments > 0) {
       console.log();
       const rows = fileStats
-        .filter(f => f.inserts + f.deletes + f.subs + f.comments > 0)
+        .filter(f => f.inserts + f.deletes + f.substitutions + f.comments > 0)
         .map(f => [
           f.file,
           f.words.toLocaleString(),
           f.inserts > 0 ? chalk.green(`+${f.inserts}`) : chalk.dim('-'),
           f.deletes > 0 ? chalk.red(`-${f.deletes}`) : chalk.dim('-'),
-          f.subs > 0 ? chalk.yellow(`~${f.subs}`) : chalk.dim('-'),
+          f.substitutions > 0 ? chalk.yellow(`~${f.substitutions}`) : chalk.dim('-'),
           f.pending > 0 ? chalk.yellow(f.pending) : (f.comments > 0 ? chalk.dim(f.comments) : chalk.dim('-')),
         ]);
 
@@ -264,7 +385,7 @@ program
     }
 
     // Check for recent docx files
-    const docxFiles = glob.sync('*.docx', { cwd: process.cwd() });
+    const docxFiles = findFiles('.docx');
     if (docxFiles.length > 0) {
       const sorted = docxFiles
         .map(f => ({ name: f, mtime: fs.statSync(f).mtime }))
@@ -285,6 +406,7 @@ program
 
 program
   .command('comments')
+  .alias('c')
   .description('List all comments in the document')
   .argument('<file>', 'Markdown file')
   .option('-p, --pending', 'Show only pending (unresolved) comments')
@@ -372,6 +494,7 @@ program
 
 program
   .command('resolve')
+  .alias('r')
   .description('Mark comments as resolved or pending')
   .argument('<file>', 'Markdown file')
   .option('-n, --number <n>', 'Comment number to toggle', parseInt)
@@ -447,6 +570,7 @@ program
 
 program
   .command('next')
+  .alias('n')
   .description('Show next pending comment')
   .argument('[file]', 'Specific file (default: all markdown files)')
   .option('-n, --number <n>', 'Skip to nth pending comment', parseInt)
@@ -454,7 +578,7 @@ program
     // Find files to search
     const files = file
       ? [file]
-      : glob.sync('*.md', { cwd: process.cwd() });
+      : findFiles('.md');
 
     if (files.length === 0) {
       console.log(fmt.status('info', 'No markdown files found.'));
@@ -514,6 +638,7 @@ program
 
 program
   .command('prev')
+  .alias('p')
   .description('Show previous pending comment')
   .argument('[file]', 'Specific file (default: all markdown files)')
   .option('-n, --number <n>', 'Skip to nth pending comment from end', parseInt)
@@ -521,7 +646,7 @@ program
     // Find files to search
     const files = file
       ? [file]
-      : glob.sync('*.md', { cwd: process.cwd() });
+      : findFiles('.md');
 
     if (files.length === 0) {
       console.log(fmt.status('info', 'No markdown files found.'));
@@ -585,7 +710,7 @@ program
 
 // Helper to find section file by name (deterministic priority)
 function findSectionFile(section) {
-  const allMd = glob.sync('*.md', { cwd: process.cwd() });
+  const allMd = findFiles('.md');
   const sectionLower = section.toLowerCase();
 
   // 1. Exact filename match
@@ -643,7 +768,7 @@ program
   .action((section) => {
     const files = section
       ? findSectionFile(section)
-      : glob.sync('*.md', { cwd: process.cwd() });
+      : findFiles('.md');
 
     if (files.length === 0) {
       console.log(fmt.status('info', 'No markdown files found.'));
@@ -691,7 +816,7 @@ program
   .action((section) => {
     const files = section
       ? findSectionFile(section)
-      : glob.sync('*.md', { cwd: process.cwd() }).reverse();
+      : findFiles('.md').reverse();
 
     if (files.length === 0) {
       console.log(fmt.status('info', 'No markdown files found.'));
@@ -735,13 +860,14 @@ program
 
 program
   .command('todo')
+  .alias('t')
   .description('List all pending comments as a checklist')
   .argument('[file]', 'Specific file (default: all markdown files)')
   .option('--by-author', 'Group by author')
   .action((file, options) => {
     const files = file
       ? [file]
-      : glob.sync('*.md', { cwd: process.cwd() });
+      : findFiles('.md');
 
     if (files.length === 0) {
       console.log(fmt.status('info', 'No markdown files found.'));
@@ -816,6 +942,7 @@ program
 
 program
   .command('accept')
+  .alias('a')
   .description('Accept track changes')
   .argument('<file>', 'Markdown file')
   .option('-n, --number <n>', 'Accept specific change by number', parseInt)
@@ -895,6 +1022,7 @@ program
 
 program
   .command('reject')
+  .alias('x')
   .description('Reject track changes')
   .argument('<file>', 'Markdown file')
   .option('-n, --number <n>', 'Reject specific change by number', parseInt)
@@ -1452,7 +1580,7 @@ program
   .action(async (docx, sections, options) => {
     // Auto-detect most recent docx if not provided
     if (!docx) {
-      const docxFiles = glob.sync('*.docx', { cwd: process.cwd() });
+      const docxFiles = findFiles('.docx');
       if (docxFiles.length === 0) {
         console.error(fmt.status('error', 'No .docx files found in current directory.'));
         process.exit(1);
@@ -2177,11 +2305,132 @@ program
   });
 
 // ============================================================================
+// DOCTOR command - Diagnose setup and configuration issues
+// ============================================================================
+
+program
+  .command('doctor')
+  .description('Diagnose setup and configuration issues')
+  .action(async () => {
+    const os = await import('os');
+    const { execSync } = await import('child_process');
+
+    console.log(chalk.bold.cyan(`\n  rev doctor`) + chalk.dim(` v${pkg.version}\n`));
+    console.log(chalk.dim(`  ${os.platform()} ${os.release()} | Node ${process.version}\n`));
+
+    let issues = 0;
+    let warnings = 0;
+
+    // Section: Environment
+    console.log(chalk.bold('  Environment'));
+    console.log(chalk.dim('  ─────────────────────────────────'));
+
+    // Node version check
+    const nodeVer = parseInt(process.version.slice(1).split('.')[0], 10);
+    if (nodeVer >= 18) {
+      console.log(chalk.green('  ✓') + ` Node.js ${process.version}`);
+    } else {
+      console.log(chalk.red('  ✗') + ` Node.js ${process.version} (requires >=18)`);
+      issues++;
+    }
+
+    // Pandoc
+    try {
+      const pandocVer = execSync('pandoc --version', { encoding: 'utf-8' }).split('\n')[0];
+      console.log(chalk.green('  ✓') + ` ${pandocVer}`);
+    } catch {
+      console.log(chalk.red('  ✗') + ' pandoc not found');
+      issues++;
+    }
+
+    // pandoc-crossref
+    try {
+      const crossrefVer = execSync('pandoc-crossref --version', { encoding: 'utf-8' }).split('\n')[0];
+      console.log(chalk.green('  ✓') + ` pandoc-crossref ${crossrefVer}`);
+    } catch {
+      console.log(chalk.yellow('  !') + ' pandoc-crossref not found (optional)');
+      warnings++;
+    }
+
+    console.log();
+    console.log(chalk.bold('  Project'));
+    console.log(chalk.dim('  ─────────────────────────────────'));
+
+    // Check for rev.yaml
+    const configPath = path.join(process.cwd(), 'rev.yaml');
+    if (fs.existsSync(configPath)) {
+      console.log(chalk.green('  ✓') + ' rev.yaml found');
+
+      // Try to load and validate config
+      try {
+        const yaml = await import('js-yaml');
+        const config = yaml.load(fs.readFileSync(configPath, 'utf-8'));
+
+        if (config.title) {
+          console.log(chalk.green('  ✓') + ` Title: ${config.title}`);
+        } else {
+          console.log(chalk.yellow('  !') + ' No title in rev.yaml');
+          warnings++;
+        }
+
+        if (config.sections && config.sections.length > 0) {
+          console.log(chalk.green('  ✓') + ` Sections: ${config.sections.length} defined`);
+
+          // Check if section files exist
+          let missing = 0;
+          for (const sec of config.sections) {
+            const secFile = typeof sec === 'string' ? sec : sec.file;
+            if (!fs.existsSync(secFile)) missing++;
+          }
+          if (missing > 0) {
+            console.log(chalk.yellow('  !') + ` ${missing} section file(s) missing`);
+            warnings++;
+          }
+        }
+
+        if (config.bibliography) {
+          if (fs.existsSync(config.bibliography)) {
+            console.log(chalk.green('  ✓') + ` Bibliography: ${config.bibliography}`);
+          } else {
+            console.log(chalk.yellow('  !') + ` Bibliography file not found: ${config.bibliography}`);
+            warnings++;
+          }
+        }
+      } catch (e) {
+        console.log(chalk.red('  ✗') + ` rev.yaml parse error: ${e.message}`);
+        issues++;
+      }
+    } else {
+      console.log(chalk.dim('  ·') + ' No rev.yaml (not a rev project)');
+    }
+
+    // Check for markdown files
+    const mdFiles = findFiles('.md');
+    if (mdFiles.length > 0) {
+      console.log(chalk.green('  ✓') + ` Markdown files: ${mdFiles.length}`);
+    } else {
+      console.log(chalk.dim('  ·') + ' No markdown files');
+    }
+
+    // Summary
+    console.log();
+    if (issues === 0 && warnings === 0) {
+      console.log(chalk.green.bold('  All checks passed! ✓\n'));
+    } else if (issues === 0) {
+      console.log(chalk.yellow(`  ${warnings} warning(s), no critical issues\n`));
+    } else {
+      console.log(chalk.red(`  ${issues} issue(s), ${warnings} warning(s)\n`));
+      console.log(chalk.dim('  Run "rev install" to fix missing dependencies.\n'));
+    }
+  });
+
+// ============================================================================
 // BUILD command - Combine sections and run pandoc
 // ============================================================================
 
 program
   .command('build')
+  .alias('b')
   .description('Build PDF/DOCX/TEX from sections')
   .argument('[formats...]', 'Output formats: pdf, docx, tex, all', ['pdf', 'docx'])
   .option('-d, --dir <directory>', 'Project directory', '.')
@@ -3756,20 +4005,26 @@ program
 
 function showFullHelp() {
   console.log(`
-${chalk.bold.cyan('rev')} - Revision workflow for Word ↔ Markdown round-trips
+${chalk.bold.cyan('rev')} ${chalk.dim(`v${pkg.version}`)} - Revision workflow for Word ↔ Markdown round-trips
 
 ${chalk.bold('DESCRIPTION')}
   Handle reviewer feedback when collaborating on academic papers.
   Import changes from Word, review them interactively, and preserve
   comments for discussion with Claude.
 
+${chalk.bold('GLOBAL OPTIONS')}
+
+  ${chalk.bold('--no-color')}               Disable colored output
+  ${chalk.bold('-q, --quiet')}              Suppress non-essential output
+  ${chalk.bold('--json')}                   Output in JSON format (for scripting)
+
 ${chalk.bold('TYPICAL WORKFLOW')}
 
-  ${chalk.dim('1.')} Build and send: ${chalk.green('rev build docx')}
+  ${chalk.dim('1.')} Build and send: ${chalk.green('rev build docx')} ${chalk.dim('(or rev b docx)')}
   ${chalk.dim('2.')} Reviewers return ${chalk.yellow('reviewed.docx')} with edits and comments
   ${chalk.dim('3.')} Sync their feedback: ${chalk.green('rev sync reviewed.docx')}
-  ${chalk.dim('4.')} Work through comments: ${chalk.green('rev next')} / ${chalk.green('rev todo')}
-  ${chalk.dim('5.')} Accept/reject changes: ${chalk.green('rev accept -a')} or ${chalk.green('rev review')}
+  ${chalk.dim('4.')} Work through comments: ${chalk.green('rev next')} ${chalk.dim('(n)')} / ${chalk.green('rev todo')} ${chalk.dim('(t)')}
+  ${chalk.dim('5.')} Accept/reject changes: ${chalk.green('rev accept -a')} ${chalk.dim('(a)')} or ${chalk.green('rev review')}
   ${chalk.dim('6.')} Rebuild: ${chalk.green('rev build docx')}
   ${chalk.dim('7.')} Archive old files: ${chalk.green('rev archive')}
 
@@ -3784,37 +4039,47 @@ ${chalk.bold('IMPORT & BUILD')}
 
   ${chalk.bold('rev sync')} [docx] [sections] Sync feedback from Word to sections
   ${chalk.bold('rev import')} <docx> [md]    Import/diff Word against Markdown
-  ${chalk.bold('rev build')} [formats]       Build PDF/DOCX/TEX from sections
+  ${chalk.bold('rev build')} ${chalk.dim('(b)')} [formats]  Build PDF/DOCX/TEX from sections
   ${chalk.bold('rev new')} [name]            Create new project from template
   ${chalk.bold('rev archive')}               Archive reviewer .docx files
 
 ${chalk.bold('REVIEW & NAVIGATE')}
 
-  ${chalk.bold('rev status')}                Project overview (words, comments)
-  ${chalk.bold('rev next')} / ${chalk.bold('prev')}           Navigate pending comments
+  ${chalk.bold('rev status')} ${chalk.dim('(s)')}            Project overview (words, comments)
+  ${chalk.bold('rev next')} ${chalk.dim('(n)')} / ${chalk.bold('prev')} ${chalk.dim('(p)')}     Navigate pending comments
   ${chalk.bold('rev first')} / ${chalk.bold('last')}          Jump to first/last comment
-  ${chalk.bold('rev todo')}                  List pending comments as checklist
-  ${chalk.bold('rev comments')} <file>       List all comments with context
+  ${chalk.bold('rev todo')} ${chalk.dim('(t)')}              List pending comments as checklist
+  ${chalk.bold('rev comments')} ${chalk.dim('(c)')} <file>   List all comments with context
 
 ${chalk.bold('ACCEPT & RESOLVE')}
 
-  ${chalk.bold('rev accept')} <file> [-n N] [-a]  Accept track changes
-  ${chalk.bold('rev reject')} <file> [-n N] [-a]  Reject track changes
+  ${chalk.bold('rev accept')} ${chalk.dim('(a)')} <file>     Accept track changes
+  ${chalk.bold('rev reject')} ${chalk.dim('(x)')} <file>     Reject track changes
   ${chalk.bold('rev reply')} <file>          Reply to reviewer comments
-  ${chalk.bold('rev resolve')} <file>        Mark comments resolved/pending
+  ${chalk.bold('rev resolve')} ${chalk.dim('(r)')} <file>    Mark comments resolved/pending
   ${chalk.bold('rev review')} <file>         Interactive accept/reject TUI
 
 ${chalk.bold('CROSS-REFERENCES')}
 
   ${chalk.bold('rev refs')} [file]           Show figure/table registry
   ${chalk.bold('rev migrate')} <file>        Convert "Fig. 1" to @fig:label
-  ${chalk.bold('rev figures')} [files]       List figures with ref counts
+  ${chalk.bold('rev figures')} ${chalk.dim('(figs)')} [files]  List figures with ref counts
 
 ${chalk.bold('CITATIONS & EQUATIONS')}
 
-  ${chalk.bold('rev citations')} [files]     Validate citations against .bib
-  ${chalk.bold('rev equations')} <action>    Extract/export LaTeX equations
+  ${chalk.bold('rev citations')} ${chalk.dim('(cite)')} [files]  Validate citations against .bib
+  ${chalk.bold('rev equations')} ${chalk.dim('(eq)')} <action>   Extract/export LaTeX equations
   ${chalk.bold('rev response')} [files]      Generate response letter
+
+${chalk.bold('UTILITIES')}
+
+  ${chalk.bold('rev word-count')} ${chalk.dim('(wc)')} [files]   Per-section word counts
+  ${chalk.bold('rev search')} <pattern>      Search across files (regex)
+  ${chalk.bold('rev diff')} [file]           Compare against git history
+  ${chalk.bold('rev grammar')} [files]       Grammar/style checking
+  ${chalk.bold('rev spelling')} [files]      Spelling check (US/British)
+  ${chalk.bold('rev lint')} [files]          Check for broken refs/citations
+  ${chalk.bold('rev check')} [files]         Pre-submission checks (lint + grammar)
 
 ${chalk.bold('CONFIGURATION')}
 
@@ -4426,7 +4691,7 @@ program
     // Find docx files to archive
     let docxFiles = files && files.length > 0
       ? files.filter(f => f.endsWith('.docx') && fs.existsSync(f))
-      : glob.sync('*.docx', { cwd: process.cwd() });
+      : findFiles('.docx');
 
     // Exclude our own build outputs (files matching project title pattern)
     let projectSlug = null;
@@ -5869,5 +6134,43 @@ program
       console.log(chalk.dim('Use --learn <word> to add words to dictionary'));
     }
   });
+
+// Get all command names for typo suggestions
+const allCommands = program.commands.map(cmd => cmd.name());
+const allAliases = program.commands.flatMap(cmd => cmd.aliases());
+const allCommandNames = [...allCommands, ...allAliases];
+
+// Handle unknown commands with suggestions
+program.on('command:*', (operands) => {
+  const unknown = operands[0];
+  console.error(chalk.red(`Unknown command: ${unknown}`));
+
+  const suggestions = suggestCommand(unknown, allCommandNames);
+  if (suggestions.length > 0) {
+    console.error();
+    console.error(chalk.yellow('Did you mean?'));
+    for (const s of suggestions) {
+      console.error(chalk.cyan(`  rev ${s}`));
+    }
+  }
+  console.error();
+  console.error(chalk.dim('Run "rev help" for available commands.'));
+  process.exit(1);
+});
+
+// Default to status when no command given
+// Check if only global options are provided (no actual command)
+const args = process.argv.slice(2);
+const globalOpts = ['--no-color', '-q', '--quiet', '--json', '-V', '--version', '-h', '--help'];
+const hasOnlyGlobalOpts = args.every(arg => globalOpts.includes(arg) || arg.startsWith('--no-') || arg.startsWith('-'));
+const hasCommand = args.some(arg => !arg.startsWith('-') && !globalOpts.includes(arg));
+
+if (args.length === 0 || (hasOnlyGlobalOpts && !hasCommand && !args.includes('-h') && !args.includes('--help') && !args.includes('-V') && !args.includes('--version'))) {
+  // Insert 'status' after any global options
+  const insertPos = process.argv.findIndex((arg, i) => i >= 2 && !arg.startsWith('-'));
+  if (insertPos === -1) {
+    process.argv.push('status');
+  }
+}
 
 program.parse();
