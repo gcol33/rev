@@ -411,6 +411,7 @@ program
   .argument('<file>', 'Markdown file')
   .option('-p, --pending', 'Show only pending (unresolved) comments')
   .option('-r, --resolved', 'Show only resolved comments')
+  .option('-a, --author <name>', 'Filter by author name (case-insensitive)')
   .option('-e, --export <csvFile>', 'Export comments to CSV file')
   .action((file, options) => {
     if (!fs.existsSync(file)) {
@@ -419,10 +420,18 @@ program
     }
 
     const text = fs.readFileSync(file, 'utf-8');
-    const comments = getComments(text, {
+    let comments = getComments(text, {
       pendingOnly: options.pending,
       resolvedOnly: options.resolved,
     });
+
+    // Filter by author if specified
+    if (options.author) {
+      const authorFilter = options.author.toLowerCase();
+      comments = comments.filter(c =>
+        c.author && c.author.toLowerCase().includes(authorFilter)
+      );
+    }
 
     // CSV export mode
     if (options.export) {
@@ -463,7 +472,8 @@ program
       return;
     }
 
-    const filter = options.pending ? ' (pending)' : options.resolved ? ' (resolved)' : '';
+    let filter = options.pending ? ' (pending)' : options.resolved ? ' (resolved)' : '';
+    if (options.author) filter += ` by "${options.author}"`;
     console.log(fmt.header(`Comments in ${path.basename(file)}${filter}`));
     console.log();
 
@@ -2942,6 +2952,7 @@ program
   .option('-m, --message <text>', 'Reply message (non-interactive)')
   .option('-n, --number <n>', 'Reply to specific comment number', parseInt)
   .option('-a, --author <name>', 'Override author name')
+  .option('--all', 'Reply to all pending comments with the same message (requires -m)')
   .action(async (file, options) => {
     if (!fs.existsSync(file)) {
       console.error(chalk.red(`File not found: ${file}`));
@@ -2958,21 +2969,42 @@ program
     }
 
     const text = fs.readFileSync(file, 'utf-8');
-    const comments = getComments(text);
+    const comments = getComments(text, { pendingOnly: true });
 
     if (comments.length === 0) {
-      console.log(chalk.green('No comments found in this file.'));
+      console.log(chalk.green('No pending comments found in this file.'));
+      return;
+    }
+
+    // Batch reply mode: reply to all pending comments
+    if (options.all) {
+      if (!options.message) {
+        console.error(chalk.red('Batch reply requires a message (-m "your reply")'));
+        console.error(chalk.dim('Example: rev reply file.md --all -m "Addressed"'));
+        process.exit(1);
+      }
+      let result = text;
+      let count = 0;
+      // Process in reverse order to maintain positions
+      const sortedComments = [...comments].sort((a, b) => b.position - a.position);
+      for (const comment of sortedComments) {
+        result = addReply(result, comment, author, options.message);
+        count++;
+      }
+      fs.writeFileSync(file, result, 'utf-8');
+      console.log(chalk.green(`Reply added to ${count} pending comment(s)`));
       return;
     }
 
     // Non-interactive mode: reply to specific comment
     if (options.message && options.number !== undefined) {
+      const allComments = getComments(text); // Get all comments for numbering
       const idx = options.number - 1;
-      if (idx < 0 || idx >= comments.length) {
-        console.error(chalk.red(`Invalid comment number. File has ${comments.length} comments.`));
+      if (idx < 0 || idx >= allComments.length) {
+        console.error(chalk.red(`Invalid comment number. File has ${allComments.length} comments.`));
         process.exit(1);
       }
-      const result = addReply(text, comments[idx], author, options.message);
+      const result = addReply(text, allComments[idx], author, options.message);
       fs.writeFileSync(file, result, 'utf-8');
       console.log(chalk.green(`Reply added to comment #${options.number}`));
       return;
@@ -4074,6 +4106,65 @@ program
   });
 
 // ============================================================================
+// ORCID command - Fetch author info from ORCID
+// ============================================================================
+
+program
+  .command('orcid')
+  .description('Fetch author information from ORCID')
+  .argument('<orcid>', 'ORCID iD (e.g., 0000-0002-1825-0097)')
+  .option('--yaml', 'Output as YAML for rev.yaml authors section')
+  .option('--badge', 'Output markdown badge')
+  .action(async (orcidInput, options) => {
+    const { fetchOrcidProfile, fetchOrcidWorkCount, formatAuthorYaml, getOrcidBadge, cleanOrcid, isValidOrcid } = await import('../lib/orcid.js');
+
+    const orcid = cleanOrcid(orcidInput);
+
+    if (!isValidOrcid(orcid)) {
+      console.error(fmt.status('error', `Invalid ORCID format: ${orcidInput}`));
+      console.log(chalk.dim('Expected format: 0000-0000-0000-0000'));
+      console.log(chalk.dim('Or: https://orcid.org/0000-0000-0000-0000'));
+      process.exit(1);
+    }
+
+    console.log(chalk.cyan(`Fetching ORCID profile...`));
+
+    try {
+      const profile = await fetchOrcidProfile(orcid);
+      const workCount = await fetchOrcidWorkCount(orcid);
+
+      if (options.yaml) {
+        console.log();
+        console.log(formatAuthorYaml(profile));
+        return;
+      }
+
+      if (options.badge) {
+        console.log();
+        console.log(getOrcidBadge(orcid));
+        return;
+      }
+
+      console.log();
+      console.log(fmt.header('ORCID Profile'));
+      console.log();
+      console.log(`  ${chalk.bold('Name:')}        ${profile.name || chalk.dim('(not public)')}`);
+      console.log(`  ${chalk.bold('ORCID:')}       ${chalk.green(profile.orcid)}`);
+      console.log(`  ${chalk.bold('Affiliation:')} ${profile.affiliation || chalk.dim('(not public)')}`);
+      console.log(`  ${chalk.bold('Email:')}       ${profile.email || chalk.dim('(not public)')}`);
+      console.log(`  ${chalk.bold('Works:')}       ${workCount} publication(s)`);
+      console.log();
+      console.log(chalk.dim(`  Profile: https://orcid.org/${profile.orcid}`));
+      console.log();
+      console.log(chalk.dim('  Use --yaml to output for rev.yaml authors section'));
+      console.log(chalk.dim('  Use --badge to get markdown badge'));
+    } catch (err) {
+      console.error(fmt.status('error', err.message));
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
 // DIFF command - Compare sections against git history
 // ============================================================================
 
@@ -4252,6 +4343,112 @@ program
         console.log(`  ${chalk.yellow(commit.hash)} ${chalk.dim(date)} ${chalk.blue(commit.author)}`);
         console.log(`    ${commit.message}`);
       }
+    }
+  });
+
+// ============================================================================
+// CONTRIBUTORS command - Show who wrote what
+// ============================================================================
+
+program
+  .command('contributors')
+  .alias('authors')
+  .description('Show author contributions across section files')
+  .argument('[file]', 'Specific file (default: all sections)')
+  .option('--blame', 'Show detailed line-by-line blame for a file')
+  .action(async (file, options) => {
+    const { isGitRepo, getAuthorStats, getContributors, getFileBlame } = await import('../lib/git.js');
+
+    if (!isGitRepo()) {
+      console.error(fmt.status('error', 'Not a git repository'));
+      process.exit(1);
+    }
+
+    console.log(fmt.header('Contributors'));
+    console.log();
+
+    if (file) {
+      // Show stats for specific file
+      if (!fs.existsSync(file)) {
+        console.error(fmt.status('error', `File not found: ${file}`));
+        process.exit(1);
+      }
+
+      if (options.blame) {
+        // Detailed blame output
+        const blame = getFileBlame(file);
+        if (blame.length === 0) {
+          console.log(fmt.status('info', 'No git history (file may not be committed)'));
+          return;
+        }
+
+        console.log(chalk.cyan(`Blame for ${file}:`));
+        console.log();
+
+        for (const entry of blame) {
+          const authorShort = entry.author.slice(0, 15).padEnd(15);
+          const content = entry.content.length > 60 ? entry.content.slice(0, 60) + '...' : entry.content;
+          console.log(`  ${chalk.dim(entry.hash)} ${chalk.blue(authorShort)} ${chalk.dim(`L${String(entry.line).padStart(3)}`)} ${content}`);
+        }
+      } else {
+        // Summary stats
+        const stats = getAuthorStats(file);
+        if (Object.keys(stats).length === 0) {
+          console.log(fmt.status('info', 'No git history (file may not be committed)'));
+          return;
+        }
+
+        console.log(chalk.cyan(`Authors for ${file}:`));
+        console.log();
+
+        const sorted = Object.entries(stats).sort((a, b) => b[1].lines - a[1].lines);
+        for (const [author, data] of sorted) {
+          const bar = '█'.repeat(Math.ceil(data.percentage / 5));
+          console.log(`  ${chalk.blue(author.padEnd(25))} ${chalk.dim(String(data.lines).padStart(4))} lines ${chalk.green(bar)} ${data.percentage}%`);
+        }
+      }
+    } else {
+      // Show contributors across all sections
+      let config = {};
+      try {
+        config = loadBuildConfig() || {};
+      } catch {
+        // Not in a rev project
+      }
+
+      let sections = config.sections || [];
+      if (sections.length === 0) {
+        sections = fs.readdirSync('.').filter(f =>
+          f.endsWith('.md') && !['README.md', 'CLAUDE.md', 'paper.md'].includes(f)
+        );
+      }
+
+      if (sections.length === 0) {
+        console.error(fmt.status('error', 'No section files found'));
+        process.exit(1);
+      }
+
+      const contributors = getContributors(sections);
+
+      if (Object.keys(contributors).length === 0) {
+        console.log(fmt.status('info', 'No git history found'));
+        return;
+      }
+
+      const sorted = Object.entries(contributors).sort((a, b) => b[1].lines - a[1].lines);
+      const totalLines = sorted.reduce((sum, [, data]) => sum + data.lines, 0);
+
+      console.log(chalk.cyan('Project contributors:'));
+      console.log();
+
+      for (const [author, data] of sorted) {
+        const pct = Math.round((data.lines / totalLines) * 100);
+        const bar = '█'.repeat(Math.ceil(pct / 5));
+        console.log(`  ${chalk.blue(author.padEnd(25))} ${chalk.dim(String(data.lines).padStart(5))} lines  ${chalk.dim(String(data.files))} files ${chalk.green(bar)} ${pct}%`);
+      }
+
+      console.log();
+      console.log(chalk.dim(`  Total: ${totalLines} lines across ${sections.length} files`));
     }
   });
 
@@ -4618,7 +4815,7 @@ ${chalk.bold('rev help')} [topic]
 program
   .command('completions')
   .description('Output shell completions')
-  .argument('<shell>', 'Shell type: bash, zsh')
+  .argument('<shell>', 'Shell type: bash, zsh, powershell')
   .action((shell) => {
     const completionsDir = path.join(import.meta.dirname, '..', 'completions');
 
@@ -4638,9 +4835,17 @@ program
         console.error(chalk.red('Zsh completions not found'));
         process.exit(1);
       }
+    } else if (shell === 'powershell' || shell === 'pwsh') {
+      const psFile = path.join(completionsDir, 'rev.ps1');
+      if (fs.existsSync(psFile)) {
+        console.log(fs.readFileSync(psFile, 'utf-8'));
+      } else {
+        console.error(chalk.red('PowerShell completions not found'));
+        process.exit(1);
+      }
     } else {
       console.error(chalk.red(`Unknown shell: ${shell}`));
-      console.log(chalk.dim('Supported shells: bash, zsh'));
+      console.log(chalk.dim('Supported shells: bash, zsh, powershell'));
       process.exit(1);
     }
   });
@@ -6407,6 +6612,77 @@ program
         console.log(chalk.blue(`${allNames.size} possible name(s)`));
       }
       console.log(chalk.dim('Use --learn <word> to add words to dictionary'));
+    }
+  });
+
+// ============================================================================
+// UPGRADE command - Self-update via npm
+// ============================================================================
+
+program
+  .command('upgrade')
+  .description('Check for updates and upgrade docrev')
+  .option('--check', 'Only check for updates, do not install')
+  .action(async (options) => {
+    const { execSync, spawn } = await import('child_process');
+
+    console.log(chalk.cyan('Checking for updates...'));
+
+    try {
+      // Get current version
+      const currentVersion = pkg.version;
+
+      // Get latest version from npm
+      let latestVersion;
+      try {
+        latestVersion = execSync('npm view docrev version', { encoding: 'utf-8' }).trim();
+      } catch {
+        console.error(chalk.red('Failed to check npm registry'));
+        console.error(chalk.dim('Check your internet connection'));
+        process.exit(1);
+      }
+
+      if (currentVersion === latestVersion) {
+        console.log(fmt.status('success', `Already on latest version (${currentVersion})`));
+        return;
+      }
+
+      console.log(`  Current: ${chalk.yellow(currentVersion)}`);
+      console.log(`  Latest:  ${chalk.green(latestVersion)}`);
+      console.log();
+
+      if (options.check) {
+        console.log(chalk.cyan('Run "rev upgrade" to install the update'));
+        return;
+      }
+
+      console.log(chalk.cyan('Upgrading...'));
+
+      // Run npm update
+      const child = spawn('npm', ['install', '-g', 'docrev@latest'], {
+        stdio: 'inherit',
+        shell: true,
+      });
+
+      child.on('close', (code) => {
+        if (code === 0) {
+          console.log();
+          console.log(fmt.status('success', `Upgraded to ${latestVersion}`));
+        } else {
+          console.error(chalk.red('Upgrade failed'));
+          console.error(chalk.dim('Try running: npm install -g docrev@latest'));
+          process.exit(1);
+        }
+      });
+
+      child.on('error', (err) => {
+        console.error(chalk.red(`Upgrade failed: ${err.message}`));
+        console.error(chalk.dim('Try running: npm install -g docrev@latest'));
+        process.exit(1);
+      });
+    } catch (err) {
+      console.error(chalk.red(`Error: ${err.message}`));
+      process.exit(1);
     }
   });
 
