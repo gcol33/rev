@@ -2710,25 +2710,31 @@ program
     }
 
     // If no sections from CLI or config, and not using a named template with --template, prompt
+    // Only prompt if stdin is a TTY (interactive terminal)
     if (!sections && options.template === 'paper') {
-      const rl = (await import('readline')).createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      });
+      if (process.stdin.isTTY) {
+        const rl = (await import('readline')).createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        });
 
-      const ask = (prompt) => new Promise((resolve) => rl.question(prompt, resolve));
+        const ask = (prompt) => new Promise((resolve) => rl.question(prompt, resolve));
 
-      console.log(chalk.cyan('Enter your document sections (comma-separated):'));
-      console.log(chalk.dim('  Example: introduction,methods,results,discussion'));
-      console.log(chalk.dim('  Press Enter to use default: introduction,methods,results,discussion\n'));
+        console.log(chalk.cyan('Enter your document sections (comma-separated):'));
+        console.log(chalk.dim('  Example: introduction,methods,results,discussion'));
+        console.log(chalk.dim('  Press Enter to use default: introduction,methods,results,discussion\n'));
 
-      const answer = await ask(chalk.cyan('Sections: '));
-      rl.close();
+        const answer = await ask(chalk.cyan('Sections: '));
+        rl.close();
 
-      if (answer.trim()) {
-        sections = answer.split(',').map((s) => s.trim().toLowerCase().replace(/\.md$/, ''));
+        if (answer.trim()) {
+          sections = answer.split(',').map((s) => s.trim().toLowerCase().replace(/\.md$/, ''));
+        } else {
+          // Use default paper template sections
+          sections = ['introduction', 'methods', 'results', 'discussion'];
+        }
       } else {
-        // Use default paper template sections
+        // Non-interactive: use default sections
         sections = ['introduction', 'methods', 'results', 'discussion'];
       }
     }
