@@ -81,12 +81,21 @@ Set your name for comment replies:
 rev config user "Your Name"
 ```
 
+Set default sections for new projects:
+
+```bash
+rev config sections "intro,methods,results,discussion"
+```
+
 This creates `~/.revrc`:
 ```json
 {
-  "user": "Your Name"
+  "userName": "Your Name",
+  "defaultSections": ["intro", "methods", "results", "discussion"]
 }
 ```
+
+When `defaultSections` is set, `rev new` uses these sections automatically. When not set, `rev new` prompts for sections interactively.
 
 ## Dictionaries
 

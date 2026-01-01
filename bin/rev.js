@@ -42,8 +42,8 @@ import {
   hasPandocCrossref,
   formatBuildResults,
 } from '../lib/build.js';
-import { getTemplate, listTemplates } from '../lib/templates.js';
-import { getUserName, setUserName, getConfigPath } from '../lib/config.js';
+import { getTemplate, listTemplates, generateCustomTemplate } from '../lib/templates.js';
+import { getUserName, setUserName, getConfigPath, getDefaultSections, setDefaultSections } from '../lib/config.js';
 import * as fmt from '../lib/format.js';
 import { inlineDiffPreview } from '../lib/format.js';
 import { parseCommentsWithReplies, collectComments, generateResponseLetter, groupByReviewer } from '../lib/response.js';
@@ -2670,6 +2670,7 @@ program
   .description('Create a new paper project from template')
   .argument('[name]', 'Project directory name')
   .option('-t, --template <name>', 'Template: paper, minimal, thesis, review', 'paper')
+  .option('-s, --sections <sections>', 'Comma-separated section names (e.g., intro,methods,results)')
   .option('--list', 'List available templates')
   .action(async (name, options) => {
     if (options.list) {
@@ -2686,13 +2687,6 @@ program
       process.exit(1);
     }
 
-    const template = getTemplate(options.template);
-    if (!template) {
-      console.error(chalk.red(`Unknown template: ${options.template}`));
-      console.error(chalk.dim('Use --list to see available templates.'));
-      process.exit(1);
-    }
-
     const projectDir = path.resolve(name);
 
     if (fs.existsSync(projectDir)) {
@@ -2700,7 +2694,58 @@ program
       process.exit(1);
     }
 
-    console.log(chalk.cyan(`Creating ${template.name} project in ${name}/...\n`));
+    let template;
+    let sections = null;
+
+    // Determine sections: CLI option > user config > prompt
+    if (options.sections) {
+      // Parse CLI sections
+      sections = options.sections.split(',').map((s) => s.trim().toLowerCase().replace(/\.md$/, ''));
+    } else {
+      // Check user config for default sections
+      const defaultSections = getDefaultSections();
+      if (defaultSections && defaultSections.length > 0) {
+        sections = defaultSections;
+      }
+    }
+
+    // If no sections from CLI or config, and not using a named template with --template, prompt
+    if (!sections && options.template === 'paper') {
+      const rl = (await import('readline')).createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+
+      const ask = (prompt) => new Promise((resolve) => rl.question(prompt, resolve));
+
+      console.log(chalk.cyan('Enter your document sections (comma-separated):'));
+      console.log(chalk.dim('  Example: introduction,methods,results,discussion'));
+      console.log(chalk.dim('  Press Enter to use default: introduction,methods,results,discussion\n'));
+
+      const answer = await ask(chalk.cyan('Sections: '));
+      rl.close();
+
+      if (answer.trim()) {
+        sections = answer.split(',').map((s) => s.trim().toLowerCase().replace(/\.md$/, ''));
+      } else {
+        // Use default paper template sections
+        sections = ['introduction', 'methods', 'results', 'discussion'];
+      }
+    }
+
+    // Generate template based on sections
+    if (sections) {
+      template = generateCustomTemplate(sections);
+      console.log(chalk.cyan(`Creating project with sections: ${sections.join(', ')}\n`));
+    } else {
+      template = getTemplate(options.template);
+      if (!template) {
+        console.error(chalk.red(`Unknown template: ${options.template}`));
+        console.error(chalk.dim('Use --list to see available templates.'));
+        process.exit(1);
+      }
+      console.log(chalk.cyan(`Creating ${template.name} project in ${name}/...\n`));
+    }
 
     // Create directory
     fs.mkdirSync(projectDir, { recursive: true });
@@ -2734,7 +2779,7 @@ program
 program
   .command('config')
   .description('Set user preferences')
-  .argument('<key>', 'Config key: user')
+  .argument('<key>', 'Config key: user, sections')
   .argument('[value]', 'Value to set')
   .action((key, value) => {
     if (key === 'user') {
@@ -2751,9 +2796,25 @@ program
           console.log(chalk.dim('Set with: rev config user "Your Name"'));
         }
       }
+    } else if (key === 'sections') {
+      if (value) {
+        const sections = value.split(',').map((s) => s.trim().toLowerCase().replace(/\.md$/, ''));
+        setDefaultSections(sections);
+        console.log(chalk.green(`Default sections set to: ${sections.join(', ')}`));
+        console.log(chalk.dim(`Saved to ${getConfigPath()}`));
+      } else {
+        const sections = getDefaultSections();
+        if (sections && sections.length > 0) {
+          console.log(`Default sections: ${chalk.bold(sections.join(', '))}`);
+        } else {
+          console.log(chalk.yellow('No default sections set.'));
+          console.log(chalk.dim('Set with: rev config sections "intro,methods,results,discussion"'));
+          console.log(chalk.dim('When not set, rev new will prompt for sections.'));
+        }
+      }
     } else {
       console.error(chalk.red(`Unknown config key: ${key}`));
-      console.error(chalk.dim('Available keys: user'));
+      console.error(chalk.dim('Available keys: user, sections'));
       process.exit(1);
     }
   });

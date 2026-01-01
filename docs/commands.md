@@ -14,7 +14,8 @@ Complete list of `rev` commands.
 | `rev build --toc` | Include table of contents |
 | `rev build --dual` | Output clean + comments DOCX (with threaded comments) |
 | `rev build --show-changes` | Export DOCX with visible track changes |
-| `rev new <name>` | Create new project from template |
+| `rev new <name>` | Create new project (prompts for sections) |
+| `rev new <name> -s intro,methods,results` | Create with specified sections |
 | `rev new --list` | List available templates |
 | `rev install` | Check/install dependencies (pandoc-crossref) |
 
@@ -93,6 +94,7 @@ Complete list of `rev` commands.
 | Command | Description |
 |---------|-------------|
 | `rev config user "Name"` | Set your name for replies |
+| `rev config sections "a,b,c"` | Set default sections for new projects |
 | `rev reply <file>` | Interactive reply to reviewer comments |
 | `rev reply <file> -n 1 -m "text"` | Reply to specific comment (non-interactive) |
 

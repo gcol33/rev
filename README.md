@@ -8,57 +8,63 @@
 
 Write in Markdown. Build to DOCX or PDF. Round-trip track changes and comments.
 
-## Why docrev
+## Why Markdown
 
-One source file. Any output format. Full version control.
+**Write once, output anywhere.** The same source file becomes a Word document for collaborators or a PDF for journal submission. Change citation styles with one line, not hours of reformatting.
 
-Write in Markdown with citations, equations, and cross-references. Build to DOCX for collaborators who use Word, or PDF for journal submission. When reviewers send back track changes and comments, import them straight into your Markdown. No more `final_v3_REAL_final.docx`.
+**Automatic numbering.** Figures, tables, equations - all numbered for you. Move Figure 3 before Figure 1? References update automatically. No more "please renumber all figures."
 
-Your manuscript stays in plain text: diff changes line by line, merge contributions, grep your content, roll back mistakes. Collaborators never need to change their workflow - they edit Word documents as usual, and you stay in control.
+**Citations that just work.** Write `[@Smith2020]` once. It renders correctly in every format, every citation style. Add a reference, delete a reference - the bibliography rebuilds itself.
 
-```bash
-# Build and send to reviewers
-rev build docx                    # → manuscript.docx
-
-# Import their feedback
-rev sync reviewed.docx        # track changes and comments → markdown
-
-# See all comments at a glance
-rev comments
-#  methods.md:12    Reviewer 2: "Please clarify the sampling method."
-#  results.md:45    Reviewer 1: "Citation needed."
-#  discussion.md:8  Editor: "Consider shortening this section."
-
-# Reply and resolve without opening Word
-rev reply methods.md -n 1 -m "Added clarification in paragraph 2"
-rev resolve methods.md -n 1
-
-# Pre-submission checks
-rev word-count                    # 4,892 words (excluding references)
-rev check                         # broken refs, missing citations
-rev doi check                     # validate all DOIs resolve
-
-# Rebuild clean + annotated versions
-rev build docx --dual             # → manuscript.docx + manuscript_comments.docx
-```
-
-Track changes appear inline in your markdown - accept or reject by editing:
-
-```markdown
-The sample size was {--100--}{++150++} participants.
-```
-
-Git integration shows what changed between revisions:
+**Real version control.** Your manuscript is plain text. Diff changes line by line, merge contributions from coauthors, roll back mistakes. See exactly what changed between drafts:
 
 ```bash
 rev diff                          # compare against last commit
 #  methods.md     +142 words  -38 words
 #  results.md      +89 words  -12 words
-
-rev history methods.md            # see revision history
-#  a1b2c3d  2024-03-15  Addressed reviewer 2 comments
-#  e4f5g6h  2024-03-01  Initial draft
 ```
+
+## How It Works
+
+```
+┌─────────────┐     rev build docx      ┌─────────────┐
+│             │ ───────────────────────→│             │
+│  Markdown   │                         │    Word     │  → collaborators
+│   (you)     │     rev build pdf       │   / PDF     │  → journals
+│             │ ───────────────────────→│             │
+└─────────────┘                         └─────────────┘
+       ↑                                       │
+       │              rev sync                 │
+       └───────────────────────────────────────┘
+              their feedback → your files
+```
+
+You stay in Markdown. Collaborators use Word. Journals get PDF. Everyone works in their preferred format.
+
+## The CLI Review Cycle
+
+When reviewers send back a Word document with track changes and comments:
+
+```bash
+rev sync reviewed.docx            # import feedback into markdown
+```
+
+Track changes appear inline - accept or reject by editing:
+
+```markdown
+The sample size was {--100--}{++150++} participants.
+```
+
+Handle comments without opening Word:
+
+```bash
+rev comments                      # list all comments
+rev reply methods.md -n 1 -m "Added clarification"
+rev resolve methods.md -n 1       # mark as resolved
+rev build docx --dual             # clean + annotated versions
+```
+
+Your entire revision cycle stays in the terminal. `final_v3_REAL_final.docx` is over.
 
 ## Install
 
@@ -85,11 +91,23 @@ rev new my-report
 cd my-report
 ```
 
-Replace `my-report` with any name. This creates a folder with that name containing:
+You'll be prompted to enter your section names, or press Enter to use the default structure. You can also specify sections directly:
+
+```bash
+rev new my-report -s intro,methods,results,discussion
+```
+
+Or set your preferred default sections once:
+
+```bash
+rev config sections "intro,methods,results,discussion"
+```
+
+This creates a folder with your chosen sections:
 
 ```
 my-report/
-├── introduction.md
+├── intro.md
 ├── methods.md
 ├── results.md
 ├── discussion.md
