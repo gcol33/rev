@@ -109,13 +109,18 @@ rev response                 # Generate point-by-point response letter
 |------|---------|
 | Create project | `rev new my-project` |
 | Import Word doc | `rev import manuscript.docx` |
-| Sync feedback | `rev sync reviewed.docx` |
+| Sync Word feedback | `rev sync reviewed.docx` |
+| Sync PDF comments | `rev sync annotated.pdf` |
+| Extract PDF comments | `rev pdf-comments annotated.pdf` |
+| Append PDF comments | `rev pdf-comments annotated.pdf --append methods.md` |
 | Project status | `rev status` |
 | Next pending | `rev next` |
 | List pending | `rev todo` |
 | Accept all changes | `rev accept file.md -a` |
 | Build Word | `rev build docx` |
-| Build clean + annotated | `rev build docx --dual` |
+| Build PDF | `rev build pdf` |
+| Build clean + annotated Word | `rev build docx --dual` |
+| Build clean + annotated PDF | `rev build pdf --dual` |
 | Archive reviewer files | `rev archive` |
 | Word count per section | `rev word-count` |
 | Project dashboard | `rev stats` |
@@ -174,13 +179,45 @@ my-document/
 └── paper.docx         # Built output
 ```
 
+## PDF Comment Workflow
+
+For reviewers who annotate PDFs instead of Word documents:
+
+### 1. Extract comments from PDF
+
+```bash
+rev pdf-comments annotated.pdf              # Display all comments
+rev pdf-comments annotated.pdf --by-author  # Group by reviewer
+rev pdf-comments annotated.pdf --json       # Output as JSON
+```
+
+### 2. Import into markdown
+
+```bash
+rev sync annotated.pdf                      # Auto-import to sections
+rev pdf-comments annotated.pdf --append methods.md  # Append to specific file
+```
+
+### 3. Build PDF with margin notes
+
+```bash
+rev build pdf --dual
+```
+
+Produces:
+- `paper.pdf` — clean version for submission
+- `paper_comments.pdf` — comments rendered as LaTeX margin notes
+
+**Supported PDF Annotations:**
+- Sticky notes, text boxes, highlights, underlines, strikethrough, squiggly
+
 ## When Helping Users
 
 1. **Setup**: Ensure `rev config user "Name"` is set for replies
-2. **Sync phase**: Run `rev sync` to get feedback as markdown
+2. **Sync phase**: Run `rev sync` to get feedback (works with both Word and PDF)
 3. **Review phase**: Use `rev todo` and `rev next` to navigate comments, `rev reply` to respond
 4. **Accept phase**: Use `rev accept -a` or `rev review` to handle track changes
-5. **Build phase**: Run `rev build docx` or `rev build docx --dual` for annotated version
+5. **Build phase**: Run `rev build docx --dual` or `rev build pdf --dual` for annotated versions
 6. **Archive phase**: Run `rev archive` to move reviewer files
 7. **Validation phase**: Run `rev check` before submission
 8. **Response letter**: Use `rev response` to generate point-by-point responses

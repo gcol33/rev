@@ -28,6 +28,7 @@ Complete list of `rev` commands.
 | `rev sync [docx] [sections...]` | Sync feedback from Word to section files |
 | `rev sync` | Auto-detect most recent .docx |
 | `rev sync reviewed.docx methods` | Sync only methods section |
+| `rev sync annotated.pdf` | Extract comments from PDF into markdown |
 | `rev extract <docx>` | Extract plain text from Word |
 | `rev archive` | Move reviewer .docx files to archive folder |
 | `rev archive --by Smith` | Specify reviewer name |
@@ -38,6 +39,30 @@ Complete list of `rev` commands.
 - Extracts comments with author and anchor text
 - Converts OMML equations to LaTeX
 - Extracts embedded images to `media/` directory
+
+## PDF Comments
+
+| Command | Description |
+|---------|-------------|
+| `rev pdf-comments <pdf>` | Extract and display comments from annotated PDF |
+| `rev pdf-comments <pdf> --append <file.md>` | Append extracted comments to markdown file |
+| `rev pdf-comments <pdf> --json` | Output comments as JSON |
+| `rev pdf-comments <pdf> --by-page` | Group comments by page (default) |
+| `rev pdf-comments <pdf> --by-author` | Group comments by author |
+| `rev build pdf --dual` | Build clean PDF + annotated PDF with margin notes |
+
+**Supported PDF Annotations:**
+- Sticky notes (Text annotations)
+- Text boxes (FreeText)
+- Highlights with comments
+- Underlines with comments
+- Strikethrough (deletion suggestions)
+- Squiggly underlines
+
+**PDF Dual Export:**
+When building with `--dual`, produces:
+- `paper.pdf` — clean version for submission
+- `paper_comments.pdf` — CriticMarkup comments rendered as LaTeX margin notes
 
 ## Review & Edit
 
