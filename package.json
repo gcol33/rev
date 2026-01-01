@@ -118,6 +118,7 @@
     "mammoth": "^1.6.0",
     "mathml-to-latex": "^1.5.0",
     "nspell": "^2.1.5",
+    "pdf-lib": "^1.17.1",
     "xml2js": "^0.6.2"
   },
   "devDependencies": {

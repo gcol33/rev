@@ -64,6 +64,13 @@ rev resolve methods.md -n 1       # mark as resolved
 rev build docx --dual             # clean + annotated versions
 ```
 
+Reviewers who annotate PDFs instead of Word? That works too:
+
+```bash
+rev sync annotated.pdf            # extract PDF comments
+rev pdf-comments annotated.pdf --append methods.md
+```
+
 Your entire revision cycle stays in the terminal. `final_v3_REAL_final.docx` is over.
 
 ## Install
@@ -343,7 +350,9 @@ The reference `@fig:map` becomes "Figure 1" in output. Numbers update automatica
 | Build DOCX | `rev build docx` |
 | Build PDF | `rev build pdf` |
 | Build clean + annotated | `rev build docx --dual` |
-| Sync feedback | `rev sync reviewed.docx` |
+| Sync Word feedback | `rev sync reviewed.docx` |
+| Sync PDF comments | `rev sync annotated.pdf` |
+| Extract PDF comments | `rev pdf-comments annotated.pdf` |
 | Project status | `rev status` |
 | Next pending comment | `rev next` |
 | List pending comments | `rev todo` |

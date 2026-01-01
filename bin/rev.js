@@ -1568,8 +1568,8 @@ program
 program
   .command('sync')
   .alias('sections')
-  .description('Sync feedback from Word doc back to section files')
-  .argument('[docx]', 'Word document from reviewer (default: most recent .docx)')
+  .description('Sync feedback from Word/PDF back to section files')
+  .argument('[file]', 'Word (.docx) or PDF file from reviewer (default: most recent)')
   .argument('[sections...]', 'Specific sections to sync (default: all)')
   .option('-c, --config <file>', 'Sections config file', 'sections.yaml')
   .option('-d, --dir <directory>', 'Directory with section files', '.')
@@ -1578,14 +1578,17 @@ program
   .option('--force', 'Overwrite files without conflict warning')
   .option('--dry-run', 'Preview without writing files')
   .action(async (docx, sections, options) => {
-    // Auto-detect most recent docx if not provided
+    // Auto-detect most recent docx or pdf if not provided
     if (!docx) {
       const docxFiles = findFiles('.docx');
-      if (docxFiles.length === 0) {
-        console.error(fmt.status('error', 'No .docx files found in current directory.'));
+      const pdfFiles = findFiles('.pdf');
+      const allFiles = [...docxFiles, ...pdfFiles];
+
+      if (allFiles.length === 0) {
+        console.error(fmt.status('error', 'No .docx or .pdf files found in current directory.'));
         process.exit(1);
       }
-      const sorted = docxFiles
+      const sorted = allFiles
         .map(f => ({ name: f, mtime: fs.statSync(f).mtime }))
         .sort((a, b) => b.mtime - a.mtime);
       docx = sorted[0].name;
@@ -1596,6 +1599,56 @@ program
     if (!fs.existsSync(docx)) {
       console.error(fmt.status('error', `File not found: ${docx}`));
       process.exit(1);
+    }
+
+    // Handle PDF files - extract comments only (no track changes)
+    if (docx.toLowerCase().endsWith('.pdf')) {
+      const { extractPdfComments, formatPdfComments, getPdfCommentStats, insertPdfCommentsIntoMarkdown } = await import('../lib/pdf-import.js');
+
+      const spin = fmt.spinner(`Extracting comments from ${path.basename(docx)}...`).start();
+
+      try {
+        const comments = await extractPdfComments(docx);
+        spin.stop();
+
+        if (comments.length === 0) {
+          console.log(fmt.status('info', 'No comments found in PDF.'));
+          return;
+        }
+
+        const stats = getPdfCommentStats(comments);
+        console.log(fmt.header(`PDF Comments from ${path.basename(docx)}`));
+        console.log();
+        console.log(formatPdfComments(comments));
+        console.log();
+
+        // Summary
+        const authorList = Object.entries(stats.byAuthor)
+          .map(([author, count]) => `${author} (${count})`)
+          .join(', ');
+        console.log(chalk.dim(`Total: ${stats.total} comments from ${authorList}`));
+        console.log();
+
+        // Offer to append to markdown files
+        const configPath = path.resolve(options.dir, options.config);
+        if (fs.existsSync(configPath) && !options.dryRun) {
+          const config = loadConfig(configPath);
+          const mainSection = config.sections?.[0];
+
+          if (mainSection) {
+            const mainPath = path.join(options.dir, mainSection);
+            if (fs.existsSync(mainPath)) {
+              console.log(chalk.dim(`Use 'rev pdf-comments ${docx} --append ${mainSection}' to add comments to markdown.`));
+            }
+          }
+        }
+      } catch (err) {
+        spin.stop();
+        console.error(fmt.status('error', `Failed to extract PDF comments: ${err.message}`));
+        if (process.env.DEBUG) console.error(err.stack);
+        process.exit(1);
+      }
+      return;
     }
 
     const configPath = path.resolve(options.dir, options.config);
@@ -3521,6 +3574,108 @@ program
     } else {
       console.error(fmt.status('error', `Unknown action: ${action}`));
       console.log(chalk.dim('Actions: list, extract, convert, from-word'));
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
+// PDF-COMMENTS command - Extract comments from PDF
+// ============================================================================
+
+program
+  .command('pdf-comments')
+  .alias('pdf')
+  .description('Extract and manage comments from annotated PDFs')
+  .argument('<pdf>', 'PDF file with annotations')
+  .option('-a, --append <file>', 'Append comments to markdown file')
+  .option('--json', 'Output as JSON')
+  .option('--by-page', 'Group comments by page')
+  .option('--by-author', 'Group comments by author')
+  .action(async (pdf, options) => {
+    if (!fs.existsSync(pdf)) {
+      console.error(fmt.status('error', `File not found: ${pdf}`));
+      process.exit(1);
+    }
+
+    if (!pdf.toLowerCase().endsWith('.pdf')) {
+      console.error(fmt.status('error', 'File must be a PDF'));
+      process.exit(1);
+    }
+
+    const { extractPdfComments, formatPdfComments, getPdfCommentStats, insertPdfCommentsIntoMarkdown } = await import('../lib/pdf-import.js');
+
+    const spin = fmt.spinner(`Extracting comments from ${path.basename(pdf)}...`).start();
+
+    try {
+      const comments = await extractPdfComments(pdf);
+      spin.stop();
+
+      if (comments.length === 0) {
+        console.log(fmt.status('info', 'No comments found in PDF.'));
+        return;
+      }
+
+      const stats = getPdfCommentStats(comments);
+
+      // JSON output
+      if (options.json) {
+        console.log(JSON.stringify({ comments, stats }, null, 2));
+        return;
+      }
+
+      // Append to markdown file
+      if (options.append) {
+        if (!fs.existsSync(options.append)) {
+          console.error(fmt.status('error', `Markdown file not found: ${options.append}`));
+          process.exit(1);
+        }
+
+        const markdown = fs.readFileSync(options.append, 'utf-8');
+        const updated = insertPdfCommentsIntoMarkdown(markdown, comments);
+        fs.writeFileSync(options.append, updated, 'utf-8');
+
+        console.log(fmt.status('success', `Added ${comments.length} comments to ${options.append}`));
+        return;
+      }
+
+      // Display comments
+      console.log(fmt.header(`PDF Comments: ${path.basename(pdf)}`));
+      console.log();
+
+      if (options.byAuthor) {
+        // Group by author
+        const byAuthor = {};
+        for (const c of comments) {
+          const author = c.author || 'Unknown';
+          if (!byAuthor[author]) byAuthor[author] = [];
+          byAuthor[author].push(c);
+        }
+
+        for (const [author, authorComments] of Object.entries(byAuthor)) {
+          console.log(chalk.bold(`${author} (${authorComments.length}):`));
+          for (const c of authorComments) {
+            console.log(`  [p.${c.page}] ${c.text}`);
+          }
+          console.log();
+        }
+      } else {
+        // Default: by page
+        console.log(formatPdfComments(comments));
+        console.log();
+      }
+
+      // Summary
+      const authorList = Object.entries(stats.byAuthor)
+        .map(([author, count]) => `${author} (${count})`)
+        .join(', ');
+      console.log(chalk.dim(`Total: ${stats.total} comments from ${authorList}`));
+      console.log();
+      console.log(chalk.dim(`Tip: Use --append <file.md> to add comments to your markdown`));
+
+    } catch (err) {
+      spin.stop();
+      console.error(fmt.status('error', `Failed to extract PDF comments: ${err.message}`));
+      if (process.env.DEBUG) console.error(err.stack);
       process.exit(1);
     }
   });
