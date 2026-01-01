@@ -126,52 +126,156 @@ program
 
 program
   .command('status')
-  .description('Show annotation statistics')
-  .argument('<file>', 'Markdown file to analyze')
-  .action((file) => {
-    if (!fs.existsSync(file)) {
-      console.error(chalk.red(`Error: File not found: ${file}`));
-      process.exit(1);
-    }
+  .description('Show project overview or file annotation statistics')
+  .argument('[file]', 'Markdown file to analyze (default: project overview)')
+  .action(async (file) => {
+    // If a specific file is given, show its annotations
+    if (file) {
+      if (!fs.existsSync(file)) {
+        console.error(chalk.red(`Error: File not found: ${file}`));
+        process.exit(1);
+      }
 
-    const text = fs.readFileSync(file, 'utf-8');
-    const counts = countAnnotations(text);
+      const text = fs.readFileSync(file, 'utf-8');
+      const counts = countAnnotations(text);
 
-    if (counts.total === 0) {
-      console.log(fmt.status('success', 'No annotations found.'));
+      if (counts.total === 0) {
+        console.log(fmt.status('success', 'No annotations found.'));
+        return;
+      }
+
+      console.log(fmt.header(`Annotations in ${path.basename(file)}`));
+      console.log();
+
+      // Build stats table
+      const rows = [];
+      if (counts.inserts > 0) rows.push([chalk.green('+'), 'Insertions', chalk.green(counts.inserts)]);
+      if (counts.deletes > 0) rows.push([chalk.red('-'), 'Deletions', chalk.red(counts.deletes)]);
+      if (counts.substitutes > 0) rows.push([chalk.yellow('~'), 'Substitutions', chalk.yellow(counts.substitutes)]);
+      if (counts.comments > 0) rows.push([chalk.blue('#'), 'Comments', chalk.blue(counts.comments)]);
+      rows.push([chalk.dim('Σ'), chalk.dim('Total'), chalk.dim(counts.total)]);
+
+      console.log(fmt.table(['', 'Type', 'Count'], rows, { align: ['center', 'left', 'right'] }));
+
+      // List comments with authors in a table
+      const comments = getComments(text);
+      if (comments.length > 0) {
+        console.log();
+        console.log(fmt.header('Comments'));
+        console.log();
+
+        const commentRows = comments.map((c, i) => [
+          chalk.dim(i + 1),
+          c.author ? chalk.blue(c.author) : chalk.dim('Anonymous'),
+          c.content.length > 45 ? c.content.slice(0, 45) + '...' : c.content,
+          chalk.dim(`L${c.line}`),
+        ]);
+
+        console.log(fmt.table(['#', 'Author', 'Comment', 'Line'], commentRows, {
+          align: ['right', 'left', 'left', 'right'],
+        }));
+      }
       return;
     }
 
-    console.log(fmt.header(`Annotations in ${path.basename(file)}`));
+    // Project overview mode
+    console.log(fmt.header('Project Status'));
     console.log();
 
-    // Build stats table
-    const rows = [];
-    if (counts.inserts > 0) rows.push([chalk.green('+'), 'Insertions', chalk.green(counts.inserts)]);
-    if (counts.deletes > 0) rows.push([chalk.red('-'), 'Deletions', chalk.red(counts.deletes)]);
-    if (counts.substitutes > 0) rows.push([chalk.yellow('~'), 'Substitutions', chalk.yellow(counts.substitutes)]);
-    if (counts.comments > 0) rows.push([chalk.blue('#'), 'Comments', chalk.blue(counts.comments)]);
-    rows.push([chalk.dim('Σ'), chalk.dim('Total'), chalk.dim(counts.total)]);
+    // Find all markdown files
+    const mdFiles = glob.sync('*.md', { cwd: process.cwd() });
+    if (mdFiles.length === 0) {
+      console.log(fmt.status('warning', 'No markdown files found in current directory.'));
+      return;
+    }
 
-    console.log(fmt.table(['', 'Type', 'Count'], rows, { align: ['center', 'left', 'right'] }));
+    // Gather stats across all files
+    let totalWords = 0;
+    let totalComments = 0;
+    let pendingComments = 0;
+    let totalInserts = 0;
+    let totalDeletes = 0;
+    let totalSubstitutes = 0;
+    const fileStats = [];
 
-    // List comments with authors in a table
-    const comments = getComments(text);
-    if (comments.length > 0) {
+    for (const file of mdFiles) {
+      const text = fs.readFileSync(file, 'utf-8');
+      const counts = countAnnotations(text);
+      const comments = getComments(text);
+      const pending = comments.filter(c => !c.resolved).length;
+
+      // Simple word count (excluding annotations)
+      const stripped = stripAnnotations(text);
+      const words = stripped.split(/\s+/).filter(w => w.length > 0).length;
+
+      totalWords += words;
+      totalComments += comments.length;
+      pendingComments += pending;
+      totalInserts += counts.inserts;
+      totalDeletes += counts.deletes;
+      totalSubstitutes += counts.substitutes;
+
+      if (counts.total > 0 || words > 0) {
+        fileStats.push({
+          file,
+          words,
+          inserts: counts.inserts,
+          deletes: counts.deletes,
+          subs: counts.substitutes,
+          comments: comments.length,
+          pending,
+        });
+      }
+    }
+
+    // Summary
+    console.log(`  ${chalk.bold(totalWords.toLocaleString())} words across ${mdFiles.length} files`);
+
+    if (totalComments > 0) {
+      console.log(`  ${chalk.blue(totalComments)} comments (${chalk.yellow(pendingComments)} pending)`);
+    }
+
+    const totalChanges = totalInserts + totalDeletes + totalSubstitutes;
+    if (totalChanges > 0) {
+      console.log(`  ${chalk.green(`+${totalInserts}`)} insertions, ${chalk.red(`-${totalDeletes}`)} deletions, ${chalk.yellow(`~${totalSubstitutes}`)} substitutions`);
+    }
+
+    // Per-file breakdown if there are annotations
+    if (totalChanges > 0 || totalComments > 0) {
       console.log();
-      console.log(fmt.header('Comments'));
+      const rows = fileStats
+        .filter(f => f.inserts + f.deletes + f.subs + f.comments > 0)
+        .map(f => [
+          f.file,
+          f.words.toLocaleString(),
+          f.inserts > 0 ? chalk.green(`+${f.inserts}`) : chalk.dim('-'),
+          f.deletes > 0 ? chalk.red(`-${f.deletes}`) : chalk.dim('-'),
+          f.subs > 0 ? chalk.yellow(`~${f.subs}`) : chalk.dim('-'),
+          f.pending > 0 ? chalk.yellow(f.pending) : (f.comments > 0 ? chalk.dim(f.comments) : chalk.dim('-')),
+        ]);
+
+      if (rows.length > 0) {
+        console.log(fmt.table(
+          ['File', 'Words', 'Ins', 'Del', 'Sub', 'Cmt'],
+          rows,
+          { align: ['left', 'right', 'right', 'right', 'right', 'right'] }
+        ));
+      }
+    }
+
+    // Check for recent docx files
+    const docxFiles = glob.sync('*.docx', { cwd: process.cwd() });
+    if (docxFiles.length > 0) {
+      const sorted = docxFiles
+        .map(f => ({ name: f, mtime: fs.statSync(f).mtime }))
+        .sort((a, b) => b.mtime - a.mtime);
+      const latest = sorted[0];
+      const age = Date.now() - latest.mtime.getTime();
+      const ageStr = age < 3600000 ? `${Math.round(age / 60000)}m ago` :
+                     age < 86400000 ? `${Math.round(age / 3600000)}h ago` :
+                     `${Math.round(age / 86400000)}d ago`;
       console.log();
-
-      const commentRows = comments.map((c, i) => [
-        chalk.dim(i + 1),
-        c.author ? chalk.blue(c.author) : chalk.dim('Anonymous'),
-        c.content.length > 45 ? c.content.slice(0, 45) + '...' : c.content,
-        chalk.dim(`L${c.line}`),
-      ]);
-
-      console.log(fmt.table(['#', 'Author', 'Comment', 'Line'], commentRows, {
-        align: ['right', 'left', 'left', 'right'],
-      }));
+      console.log(chalk.dim(`  Latest DOCX: ${latest.name} (${ageStr})`));
     }
   });
 
@@ -335,6 +439,533 @@ program
     console.log(chalk.dim('  Usage: rev resolve <file> -n <number>    Mark specific comment'));
     console.log(chalk.dim('         rev resolve <file> -a             Mark all as resolved'));
     console.log(chalk.dim('         rev resolve <file> -n 1 -u        Unresolve comment #1'));
+  });
+
+// ============================================================================
+// NEXT command - Show next pending comment
+// ============================================================================
+
+program
+  .command('next')
+  .description('Show next pending comment')
+  .argument('[file]', 'Specific file (default: all markdown files)')
+  .option('-n, --number <n>', 'Skip to nth pending comment', parseInt)
+  .action((file, options) => {
+    // Find files to search
+    const files = file
+      ? [file]
+      : glob.sync('*.md', { cwd: process.cwd() });
+
+    if (files.length === 0) {
+      console.log(fmt.status('info', 'No markdown files found.'));
+      return;
+    }
+
+    // Collect all pending comments across files
+    const allPending = [];
+    for (const f of files) {
+      if (!fs.existsSync(f)) continue;
+      const text = fs.readFileSync(f, 'utf-8');
+      const allComments = getComments(text);
+      const pending = getComments(text, { pendingOnly: true });
+
+      for (const c of pending) {
+        const idx = allComments.findIndex(x => x.position === c.position) + 1;
+        allPending.push({ ...c, file: f, number: idx });
+      }
+    }
+
+    if (allPending.length === 0) {
+      console.log(fmt.status('success', 'No pending comments!'));
+      return;
+    }
+
+    // Get the nth pending comment (default: 1st)
+    const targetIdx = (options.number || 1) - 1;
+    if (targetIdx < 0 || targetIdx >= allPending.length) {
+      console.error(chalk.red(`Invalid number. Only ${allPending.length} pending comment(s).`));
+      process.exit(1);
+    }
+
+    const c = allPending[targetIdx];
+    const position = targetIdx + 1;
+
+    console.log(fmt.header(`Comment ${position}/${allPending.length}`));
+    console.log();
+    console.log(`  ${chalk.cyan(c.file)}:${c.line} ${chalk.dim(`#${c.number}`)}`);
+    console.log();
+    if (c.author) console.log(`  ${chalk.blue(c.author)}`);
+    console.log(`  ${c.content}`);
+    if (c.before) {
+      console.log();
+      console.log(chalk.dim(`  Context: "${c.before.trim().slice(-60)}"`));
+    }
+    console.log();
+    console.log(chalk.dim(`  rev reply ${c.file} -n ${c.number} -m "..."`));
+    console.log(chalk.dim(`  rev resolve ${c.file} -n ${c.number}`));
+    if (position < allPending.length) {
+      console.log(chalk.dim(`  rev next -n ${position + 1}`));
+    }
+  });
+
+// ============================================================================
+// PREV command - Show previous/last pending comment
+// ============================================================================
+
+program
+  .command('prev')
+  .description('Show previous pending comment')
+  .argument('[file]', 'Specific file (default: all markdown files)')
+  .option('-n, --number <n>', 'Skip to nth pending comment from end', parseInt)
+  .action((file, options) => {
+    // Find files to search
+    const files = file
+      ? [file]
+      : glob.sync('*.md', { cwd: process.cwd() });
+
+    if (files.length === 0) {
+      console.log(fmt.status('info', 'No markdown files found.'));
+      return;
+    }
+
+    // Collect all pending comments across files
+    const allPending = [];
+    for (const f of files) {
+      if (!fs.existsSync(f)) continue;
+      const text = fs.readFileSync(f, 'utf-8');
+      const allComments = getComments(text);
+      const pending = getComments(text, { pendingOnly: true });
+
+      for (const c of pending) {
+        const idx = allComments.findIndex(x => x.position === c.position) + 1;
+        allPending.push({ ...c, file: f, number: idx });
+      }
+    }
+
+    if (allPending.length === 0) {
+      console.log(fmt.status('success', 'No pending comments!'));
+      return;
+    }
+
+    // Get the nth pending comment from end (default: last)
+    const fromEnd = options.number || 1;
+    const targetIdx = allPending.length - fromEnd;
+    if (targetIdx < 0 || targetIdx >= allPending.length) {
+      console.error(chalk.red(`Invalid number. Only ${allPending.length} pending comment(s).`));
+      process.exit(1);
+    }
+
+    const c = allPending[targetIdx];
+    const position = targetIdx + 1;
+
+    console.log(fmt.header(`Comment ${position}/${allPending.length}`));
+    console.log();
+    console.log(`  ${chalk.cyan(c.file)}:${c.line} ${chalk.dim(`#${c.number}`)}`);
+    console.log();
+    if (c.author) console.log(`  ${chalk.blue(c.author)}`);
+    console.log(`  ${c.content}`);
+    if (c.before) {
+      console.log();
+      console.log(chalk.dim(`  Context: "${c.before.trim().slice(-60)}"`));
+    }
+    console.log();
+    console.log(chalk.dim(`  rev reply ${c.file} -n ${c.number} -m "..."`));
+    console.log(chalk.dim(`  rev resolve ${c.file} -n ${c.number}`));
+    if (position > 1) {
+      console.log(chalk.dim(`  rev next -n ${position - 1}`));
+    }
+    if (position < allPending.length) {
+      console.log(chalk.dim(`  rev next -n ${position + 1}`));
+    }
+  });
+
+// ============================================================================
+// FIRST command - Show first comment (all, not just pending)
+// ============================================================================
+
+// Helper to find section file by name (deterministic priority)
+function findSectionFile(section) {
+  const allMd = glob.sync('*.md', { cwd: process.cwd() });
+  const sectionLower = section.toLowerCase();
+
+  // 1. Exact filename match
+  const exactFile = allMd.find(f => f === section || f === `${section}.md`);
+  if (exactFile) return [exactFile];
+
+  // 2. Filename contains (partial match)
+  const filenameMatch = allMd.filter(f =>
+    f.toLowerCase().replace(/\.md$/, '').includes(sectionLower)
+  );
+  if (filenameMatch.length === 1) return filenameMatch;
+  if (filenameMatch.length > 1) {
+    console.log(chalk.yellow(`  Multiple files match "${section}": ${filenameMatch.join(', ')}`));
+    console.log(chalk.dim(`  Using first match: ${filenameMatch[0]}`));
+    return [filenameMatch[0]];
+  }
+
+  // 3. Exact header match
+  for (const f of allMd) {
+    try {
+      const text = fs.readFileSync(f, 'utf-8');
+      const headerMatch = text.match(/^#\s+(.+)$/m);
+      if (headerMatch && headerMatch[1].toLowerCase().trim() === sectionLower) {
+        return [f];
+      }
+    } catch (e) {}
+  }
+
+  // 4. Header contains (partial match)
+  const headerMatches = [];
+  for (const f of allMd) {
+    try {
+      const text = fs.readFileSync(f, 'utf-8');
+      const headerMatch = text.match(/^#\s+(.+)$/m);
+      if (headerMatch && headerMatch[1].toLowerCase().includes(sectionLower)) {
+        headerMatches.push(f);
+      }
+    } catch (e) {}
+  }
+  if (headerMatches.length === 1) return headerMatches;
+  if (headerMatches.length > 1) {
+    console.log(chalk.yellow(`  Multiple files match "${section}": ${headerMatches.join(', ')}`));
+    console.log(chalk.dim(`  Using first match: ${headerMatches[0]}`));
+    return [headerMatches[0]];
+  }
+
+  // No match - return original (will fail later with file not found)
+  return [section];
+}
+
+program
+  .command('first')
+  .description('Show first comment')
+  .argument('[section]', 'Specific file or section name (default: all markdown files)')
+  .action((section) => {
+    const files = section
+      ? findSectionFile(section)
+      : glob.sync('*.md', { cwd: process.cwd() });
+
+    if (files.length === 0) {
+      console.log(fmt.status('info', 'No markdown files found.'));
+      return;
+    }
+
+    // Find first comment across files
+    for (const f of files) {
+      if (!fs.existsSync(f)) continue;
+      const text = fs.readFileSync(f, 'utf-8');
+      const comments = getComments(text);
+
+      if (comments.length > 0) {
+        const c = comments[0];
+        const statusIcon = c.resolved ? chalk.green('✓') : chalk.yellow('○');
+
+        console.log(fmt.header(`Comment 1/${comments.length}`));
+        console.log();
+        console.log(`  ${chalk.cyan(f)}:${c.line} #1 ${statusIcon}`);
+        console.log();
+        if (c.author) console.log(`  ${chalk.blue(c.author)}`);
+        console.log(`  ${c.content}`);
+        if (c.before) {
+          console.log();
+          console.log(chalk.dim(`  Context: "${c.before.trim().slice(-60)}"`));
+        }
+        console.log();
+        console.log(chalk.dim(`  rev reply ${f} -n 1 -m "..."`));
+        console.log(chalk.dim(`  rev resolve ${f} -n 1`));
+        return;
+      }
+    }
+
+    console.log(fmt.status('info', 'No comments found.'));
+  });
+
+// ============================================================================
+// LAST command - Show last comment (all, not just pending)
+// ============================================================================
+
+program
+  .command('last')
+  .description('Show last comment')
+  .argument('[section]', 'Specific file or section name (default: all markdown files)')
+  .action((section) => {
+    const files = section
+      ? findSectionFile(section)
+      : glob.sync('*.md', { cwd: process.cwd() }).reverse();
+
+    if (files.length === 0) {
+      console.log(fmt.status('info', 'No markdown files found.'));
+      return;
+    }
+
+    // Find last comment across files (reverse order)
+    for (const f of files) {
+      if (!fs.existsSync(f)) continue;
+      const text = fs.readFileSync(f, 'utf-8');
+      const comments = getComments(text);
+
+      if (comments.length > 0) {
+        const c = comments[comments.length - 1];
+        const idx = comments.length;
+        const statusIcon = c.resolved ? chalk.green('✓') : chalk.yellow('○');
+
+        console.log(fmt.header(`Comment ${idx}/${comments.length}`));
+        console.log();
+        console.log(`  ${chalk.cyan(f)}:${c.line} #${idx} ${statusIcon}`);
+        console.log();
+        if (c.author) console.log(`  ${chalk.blue(c.author)}`);
+        console.log(`  ${c.content}`);
+        if (c.before) {
+          console.log();
+          console.log(chalk.dim(`  Context: "${c.before.trim().slice(-60)}"`));
+        }
+        console.log();
+        console.log(chalk.dim(`  rev reply ${f} -n ${idx} -m "..."`));
+        console.log(chalk.dim(`  rev resolve ${f} -n ${idx}`));
+        return;
+      }
+    }
+
+    console.log(fmt.status('info', 'No comments found.'));
+  });
+
+// ============================================================================
+// TODO command - List pending comments as checklist
+// ============================================================================
+
+program
+  .command('todo')
+  .description('List all pending comments as a checklist')
+  .argument('[file]', 'Specific file (default: all markdown files)')
+  .option('--by-author', 'Group by author')
+  .action((file, options) => {
+    const files = file
+      ? [file]
+      : glob.sync('*.md', { cwd: process.cwd() });
+
+    if (files.length === 0) {
+      console.log(fmt.status('info', 'No markdown files found.'));
+      return;
+    }
+
+    // Collect all pending comments
+    const todos = [];
+    for (const f of files) {
+      if (!fs.existsSync(f)) continue;
+      const text = fs.readFileSync(f, 'utf-8');
+      const allComments = getComments(text);
+      const pending = allComments.filter(c => !c.resolved);
+
+      for (const c of pending) {
+        const idx = allComments.findIndex(x => x.position === c.position) + 1;
+        todos.push({
+          file: f,
+          number: idx,
+          line: c.line,
+          author: c.author || 'Anonymous',
+          content: c.content,
+        });
+      }
+    }
+
+    if (todos.length === 0) {
+      console.log(fmt.status('success', 'No pending comments!'));
+      return;
+    }
+
+    console.log(fmt.header(`Todo (${todos.length} pending)`));
+    console.log();
+
+    if (options.byAuthor) {
+      // Group by author
+      const byAuthor = {};
+      for (const t of todos) {
+        if (!byAuthor[t.author]) byAuthor[t.author] = [];
+        byAuthor[t.author].push(t);
+      }
+
+      for (const [author, items] of Object.entries(byAuthor)) {
+        console.log(`  ${chalk.blue(author)} (${items.length})`);
+        for (const t of items) {
+          const preview = t.content.length > 50 ? t.content.slice(0, 50) + '...' : t.content;
+          console.log(`    ${chalk.yellow('○')} ${chalk.dim(`${t.file}:${t.line}`)} ${preview}`);
+        }
+        console.log();
+      }
+    } else {
+      // List by file
+      let currentFile = null;
+      for (const t of todos) {
+        if (t.file !== currentFile) {
+          if (currentFile) console.log();
+          console.log(`  ${chalk.cyan(t.file)}`);
+          currentFile = t.file;
+        }
+        const preview = t.content.length > 50 ? t.content.slice(0, 50) + '...' : t.content;
+        const authorTag = t.author !== 'Anonymous' ? chalk.dim(`[${t.author}] `) : '';
+        console.log(`    ${chalk.yellow('○')} #${t.number} ${authorTag}${preview}`);
+      }
+    }
+
+    console.log();
+  });
+
+// ============================================================================
+// ACCEPT command - Accept track changes
+// ============================================================================
+
+program
+  .command('accept')
+  .description('Accept track changes')
+  .argument('<file>', 'Markdown file')
+  .option('-n, --number <n>', 'Accept specific change by number', parseInt)
+  .option('-a, --all', 'Accept all changes')
+  .option('--dry-run', 'Preview without saving')
+  .action((file, options) => {
+    if (!fs.existsSync(file)) {
+      console.error(chalk.red(`Error: File not found: ${file}`));
+      process.exit(1);
+    }
+
+    let text = fs.readFileSync(file, 'utf-8');
+    const changes = getTrackChanges(text);
+
+    if (changes.length === 0) {
+      console.log(fmt.status('info', 'No track changes found.'));
+      return;
+    }
+
+    if (options.all) {
+      // Accept all changes - process in reverse to preserve positions
+      const sorted = [...changes].sort((a, b) => b.position - a.position);
+      for (const change of sorted) {
+        text = applyDecision(text, change, true);
+      }
+      if (!options.dryRun) {
+        fs.writeFileSync(file, text, 'utf-8');
+        console.log(fmt.status('success', `Accepted ${changes.length} change(s)`));
+      } else {
+        console.log(fmt.status('info', `Would accept ${changes.length} change(s)`));
+      }
+      return;
+    }
+
+    if (options.number !== undefined) {
+      const idx = options.number - 1;
+      if (idx < 0 || idx >= changes.length) {
+        console.error(chalk.red(`Invalid change number. File has ${changes.length} changes.`));
+        process.exit(1);
+      }
+      const change = changes[idx];
+      text = applyDecision(text, change, true);
+      if (!options.dryRun) {
+        fs.writeFileSync(file, text, 'utf-8');
+        console.log(fmt.status('success', `Accepted change #${options.number}`));
+      } else {
+        console.log(fmt.status('info', `Would accept change #${options.number}`));
+      }
+      return;
+    }
+
+    // No options: show changes
+    console.log(fmt.header(`Track Changes in ${path.basename(file)}`));
+    console.log();
+
+    for (let i = 0; i < changes.length; i++) {
+      const c = changes[i];
+      let desc;
+      if (c.type === 'insert') {
+        desc = chalk.green(`+++ "${c.content.slice(0, 40)}${c.content.length > 40 ? '...' : ''}"`);
+      } else if (c.type === 'delete') {
+        desc = chalk.red(`--- "${c.content.slice(0, 40)}${c.content.length > 40 ? '...' : ''}"`);
+      } else if (c.type === 'substitute') {
+        desc = chalk.yellow(`~~~ "${c.content.slice(0, 20)}" → "${(c.replacement || '').slice(0, 20)}"`);
+      }
+      console.log(`  #${i + 1} ${chalk.dim(`L${c.line}`)} ${desc}`);
+    }
+
+    console.log();
+    console.log(chalk.dim(`  rev accept ${file} -n <number>    Accept specific change`));
+    console.log(chalk.dim(`  rev accept ${file} -a             Accept all changes`));
+  });
+
+// ============================================================================
+// REJECT command - Reject track changes
+// ============================================================================
+
+program
+  .command('reject')
+  .description('Reject track changes')
+  .argument('<file>', 'Markdown file')
+  .option('-n, --number <n>', 'Reject specific change by number', parseInt)
+  .option('-a, --all', 'Reject all changes')
+  .option('--dry-run', 'Preview without saving')
+  .action((file, options) => {
+    if (!fs.existsSync(file)) {
+      console.error(chalk.red(`Error: File not found: ${file}`));
+      process.exit(1);
+    }
+
+    let text = fs.readFileSync(file, 'utf-8');
+    const changes = getTrackChanges(text);
+
+    if (changes.length === 0) {
+      console.log(fmt.status('info', 'No track changes found.'));
+      return;
+    }
+
+    if (options.all) {
+      // Reject all changes - process in reverse to preserve positions
+      const sorted = [...changes].sort((a, b) => b.position - a.position);
+      for (const change of sorted) {
+        text = applyDecision(text, change, false);
+      }
+      if (!options.dryRun) {
+        fs.writeFileSync(file, text, 'utf-8');
+        console.log(fmt.status('success', `Rejected ${changes.length} change(s)`));
+      } else {
+        console.log(fmt.status('info', `Would reject ${changes.length} change(s)`));
+      }
+      return;
+    }
+
+    if (options.number !== undefined) {
+      const idx = options.number - 1;
+      if (idx < 0 || idx >= changes.length) {
+        console.error(chalk.red(`Invalid change number. File has ${changes.length} changes.`));
+        process.exit(1);
+      }
+      const change = changes[idx];
+      text = applyDecision(text, change, false);
+      if (!options.dryRun) {
+        fs.writeFileSync(file, text, 'utf-8');
+        console.log(fmt.status('success', `Rejected change #${options.number}`));
+      } else {
+        console.log(fmt.status('info', `Would reject change #${options.number}`));
+      }
+      return;
+    }
+
+    // No options: show changes (same as accept)
+    console.log(fmt.header(`Track Changes in ${path.basename(file)}`));
+    console.log();
+
+    for (let i = 0; i < changes.length; i++) {
+      const c = changes[i];
+      let desc;
+      if (c.type === 'insert') {
+        desc = chalk.green(`+++ "${c.content.slice(0, 40)}${c.content.length > 40 ? '...' : ''}"`);
+      } else if (c.type === 'delete') {
+        desc = chalk.red(`--- "${c.content.slice(0, 40)}${c.content.length > 40 ? '...' : ''}"`);
+      } else if (c.type === 'substitute') {
+        desc = chalk.yellow(`~~~ "${c.content.slice(0, 20)}" → "${(c.replacement || '').slice(0, 20)}"`);
+      }
+      console.log(`  #${i + 1} ${chalk.dim(`L${c.line}`)} ${desc}`);
+    }
+
+    console.log();
+    console.log(chalk.dim(`  rev reject ${file} -n <number>    Reject specific change`));
+    console.log(chalk.dim(`  rev reject ${file} -a             Reject all changes`));
   });
 
 // ============================================================================
@@ -807,16 +1438,33 @@ program
 // ============================================================================
 
 program
-  .command('sections')
-  .description('Import Word doc directly to section files')
-  .argument('<docx>', 'Word document from reviewer')
+  .command('sync')
+  .alias('sections')
+  .description('Sync feedback from Word doc back to section files')
+  .argument('[docx]', 'Word document from reviewer (default: most recent .docx)')
+  .argument('[sections...]', 'Specific sections to sync (default: all)')
   .option('-c, --config <file>', 'Sections config file', 'sections.yaml')
   .option('-d, --dir <directory>', 'Directory with section files', '.')
   .option('--no-crossref', 'Skip converting hardcoded figure/table refs')
   .option('--no-diff', 'Skip showing diff preview')
   .option('--force', 'Overwrite files without conflict warning')
   .option('--dry-run', 'Preview without writing files')
-  .action(async (docx, options) => {
+  .action(async (docx, sections, options) => {
+    // Auto-detect most recent docx if not provided
+    if (!docx) {
+      const docxFiles = glob.sync('*.docx', { cwd: process.cwd() });
+      if (docxFiles.length === 0) {
+        console.error(fmt.status('error', 'No .docx files found in current directory.'));
+        process.exit(1);
+      }
+      const sorted = docxFiles
+        .map(f => ({ name: f, mtime: fs.statSync(f).mtime }))
+        .sort((a, b) => b.mtime - a.mtime);
+      docx = sorted[0].name;
+      console.log(fmt.status('info', `Using most recent: ${docx}`));
+      console.log();
+    }
+
     if (!fs.existsSync(docx)) {
       console.error(fmt.status('error', `File not found: ${docx}`));
       process.exit(1);
@@ -852,13 +1500,29 @@ program
       const wordText = wordResult.value;
 
       // Extract sections from Word text
-      const wordSections = extractSectionsFromText(wordText, config.sections);
+      let wordSections = extractSectionsFromText(wordText, config.sections);
 
       if (wordSections.length === 0) {
         spin.stop();
         console.error(fmt.status('warning', 'No sections detected in Word document.'));
         console.error(chalk.dim('  Check that headings match sections.yaml'));
         process.exit(1);
+      }
+
+      // Filter to specific sections if any were specified
+      if (sections && sections.length > 0) {
+        const onlyList = sections.map(s => s.trim().toLowerCase());
+        wordSections = wordSections.filter(section => {
+          const fileName = section.file.replace(/\.md$/i, '').toLowerCase();
+          const header = section.header.toLowerCase();
+          return onlyList.some(name => fileName === name || fileName.includes(name) || header.includes(name));
+        });
+        if (wordSections.length === 0) {
+          spin.stop();
+          console.error(fmt.status('error', `No sections matched: ${sections.join(', ')}`));
+          console.error(chalk.dim(`  Available: ${extractSectionsFromText(wordText, config.sections).map(s => s.file.replace(/\.md$/i, '')).join(', ')}`));
+          process.exit(1);
+        }
       }
 
       spin.stop();
@@ -3764,6 +4428,153 @@ program
 
     zip.writeZip(outputPath);
     console.log(fmt.status('success', `Backup created: ${outputPath}`));
+  });
+
+// ============================================================================
+// ARCHIVE command - Archive reviewer docx files
+// ============================================================================
+
+program
+  .command('archive')
+  .description('Move reviewer .docx files to archive folder')
+  .argument('[files...]', 'Specific files to archive (default: all .docx)')
+  .option('-d, --dir <folder>', 'Archive folder name', 'archive')
+  .option('--by <name>', 'Reviewer name (auto-detected if single commenter)')
+  .option('--no-rename', 'Keep original filenames')
+  .option('--dry-run', 'Preview without moving files')
+  .action(async (files, options) => {
+    const { extractWordComments } = await import('../lib/import.js');
+
+    // Find docx files to archive
+    let docxFiles = files && files.length > 0
+      ? files.filter(f => f.endsWith('.docx') && fs.existsSync(f))
+      : glob.sync('*.docx', { cwd: process.cwd() });
+
+    // Exclude our own build outputs (files matching project title pattern)
+    let projectSlug = null;
+    const configPath = path.join(process.cwd(), 'rev.yaml');
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = yaml.load(fs.readFileSync(configPath, 'utf-8'));
+        if (config.title) {
+          projectSlug = config.title
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-|-$/g, '')
+            .slice(0, 50);
+        }
+      } catch (e) {
+        // Ignore config errors
+      }
+    }
+
+    // Filter out build outputs: project-name.docx, project-name_comments.docx, project-name-changes.docx
+    if (projectSlug && files.length === 0) {
+      const buildPatterns = [
+        `${projectSlug}.docx`,
+        `${projectSlug}_comments.docx`,
+        `${projectSlug}-changes.docx`,
+        'paper.docx',
+        'paper_comments.docx',
+        'paper-changes.docx',
+      ];
+      const excluded = [];
+      docxFiles = docxFiles.filter(f => {
+        const base = path.basename(f).toLowerCase();
+        const isBuilt = buildPatterns.includes(base);
+        if (isBuilt) excluded.push(f);
+        return !isBuilt;
+      });
+      if (excluded.length > 0) {
+        console.log(chalk.dim(`  Skipping build outputs: ${excluded.join(', ')}`));
+        console.log();
+      }
+    }
+
+    if (docxFiles.length === 0) {
+      console.log(fmt.status('info', 'No .docx files to archive.'));
+      return;
+    }
+
+    // Use projectSlug from earlier config read
+    const projectTitle = projectSlug;
+
+    // Create archive folder
+    const archiveDir = path.resolve(options.dir);
+    if (!options.dryRun && !fs.existsSync(archiveDir)) {
+      fs.mkdirSync(archiveDir, { recursive: true });
+    }
+
+    console.log(fmt.header('Archive'));
+    console.log();
+
+    const moved = [];
+    for (const file of docxFiles) {
+      const stat = fs.statSync(file);
+      const mtime = stat.mtime;
+      const timestamp = mtime.toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '_');
+      // Result: YYYYMMDD_HHMMSS
+
+      // Determine reviewer name
+      let reviewer = options.by || null;
+      if (!reviewer && options.rename !== false) {
+        try {
+          const comments = await extractWordComments(file);
+          const authors = [...new Set(comments.map(c => c.author).filter(a => a && a !== 'Unknown'))];
+          if (authors.length === 1) {
+            // Single commenter - use their name
+            reviewer = authors[0].replace(/[^a-zA-Z0-9]/g, '-').replace(/^-|-$/g, '');
+          }
+        } catch (e) {
+          // Ignore extraction errors
+        }
+      }
+
+      // Generate new name: YYYYMMDD_HHMMSS[_reviewer]_project.docx
+      let newName;
+      if (options.rename === false) {
+        newName = path.basename(file);
+      } else {
+        // Avoid double-timestamping if already has timestamp prefix
+        const base = path.basename(file, '.docx');
+        if (/^\d{8}_\d{6}_/.test(base)) {
+          newName = path.basename(file);
+        } else {
+          const namePart = projectTitle || base;
+          if (reviewer) {
+            newName = `${timestamp}_${reviewer}_${namePart}.docx`;
+          } else {
+            newName = `${timestamp}_${namePart}.docx`;
+          }
+        }
+      }
+
+      const destPath = path.join(archiveDir, newName);
+
+      if (options.dryRun) {
+        console.log(`  ${chalk.dim(file)} → ${chalk.cyan(path.join(options.dir, newName))}`);
+      } else {
+        // Handle name collision
+        let finalPath = destPath;
+        let counter = 1;
+        while (fs.existsSync(finalPath)) {
+          const ext = path.extname(newName);
+          const base = path.basename(newName, ext);
+          finalPath = path.join(archiveDir, `${base}_${counter}${ext}`);
+          counter++;
+        }
+        fs.renameSync(file, finalPath);
+        console.log(`  ${chalk.dim(file)} → ${chalk.green(path.relative(process.cwd(), finalPath))}`);
+      }
+      moved.push(file);
+    }
+
+    console.log();
+    if (options.dryRun) {
+      console.log(fmt.status('info', `Would archive ${moved.length} file(s). Run without --dry-run to proceed.`));
+    } else {
+      console.log(fmt.status('success', `Archived ${moved.length} file(s) to ${options.dir}/`));
+    }
   });
 
 // ============================================================================

@@ -6,88 +6,73 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/gcol33/docrev/actions/workflows/ci.yml/badge.svg)](https://github.com/gcol33/docrev/actions/workflows/ci.yml)
 
-Write in Markdown. Build to Word. Round-trip track changes and comments.
+Write in Markdown. Build to DOCX or PDF. Round-trip track changes and comments.
 
 ## Why docrev
 
-Write in Markdown with citations, equations, and cross-references. Build to a properly formatted Word document. Most tools only convert Word to Markdown. docrev goes both ways.
+One source file. Any output format. Full version control.
 
-Why Markdown? It's plain text: you can use any editor, diff changes line by line, merge branches, grep your manuscript, and keep everything in git. No vendor lock-in, no binary blobs, no corruption.
+Write in Markdown with citations, equations, and cross-references. Build to DOCX for collaborators who use Word, or PDF for journal submission. When reviewers send back track changes and comments, import them straight into your Markdown. No more `final_v3_REAL_final.docx`.
 
-Work entirely from the command line. List comments, reply to reviewers, resolve threads, check word counts, validate citations - all without opening Word.
-
-If your collaborators use Word, you know the problem: they send track changes and comments, but those documents don't diff, don't merge, and don't version control. docrev bridges this gap:
-
-```
-You write          Collaborators review       You see
-─────────────────────────────────────────────────────
-methods.md    →    methods.docx          →    methods.md
-(plain text)       (track changes,            (annotations
-                    comments)                  in text)
-```
-
-The core workflow:
+Your manuscript stays in plain text: diff changes line by line, merge contributions, grep your content, roll back mistakes. Collaborators never need to change their workflow - they edit Word documents as usual, and you stay in control.
 
 ```bash
-rev build docx        # markdown → Word document
-# ... collaborators review in Word ...
-rev sections reviewed.docx   # Word feedback → markdown annotations
+# Build and send to reviewers
+rev build docx                    # → manuscript.docx
+
+# Import their feedback
+rev sync reviewed.docx        # track changes and comments → markdown
+
+# See all comments at a glance
+rev comments
+#  methods.md:12    Reviewer 2: "Please clarify the sampling method."
+#  results.md:45    Reviewer 1: "Citation needed."
+#  discussion.md:8  Editor: "Consider shortening this section."
+
+# Reply and resolve without opening Word
+rev reply methods.md -n 1 -m "Added clarification in paragraph 2"
+rev resolve methods.md -n 1
+
+# Pre-submission checks
+rev word-count                    # 4,892 words (excluding references)
+rev check                         # broken refs, missing citations
+rev doi check                     # validate all DOIs resolve
+
+# Rebuild clean + annotated versions
+rev build docx --dual             # → manuscript.docx + manuscript_comments.docx
 ```
 
-Your markdown files now contain their track changes and comments as inline annotations. Review them in your editor, accept or reject changes, reply to comments, rebuild. All under version control.
+Track changes appear inline in your markdown - accept or reject by editing:
+
+```markdown
+The sample size was {--100--}{++150++} participants.
+```
+
+Git integration shows what changed between revisions:
+
+```bash
+rev diff                          # compare against last commit
+#  methods.md     +142 words  -38 words
+#  results.md      +89 words  -12 words
+
+rev history methods.md            # see revision history
+#  a1b2c3d  2024-03-15  Addressed reviewer 2 comments
+#  e4f5g6h  2024-03-01  Initial draft
+```
 
 ## Install
-
-### Step 1: Install docrev
-
-Requires [Node.js](https://nodejs.org) 18 or later.
 
 ```bash
 npm install -g docrev
 ```
 
-### Step 2: Install Pandoc
+Requires [Node.js](https://nodejs.org) 18+, [Pandoc](https://pandoc.org) 2.11+, and a [LaTeX distribution](#installing-dependencies) for PDF output.
 
-[Pandoc](https://pandoc.org) handles document conversion. Install it for your platform:
-
-**macOS**
-```bash
-brew install pandoc
-```
-
-**Windows**
-```bash
-winget install JohnMacFarlane.Pandoc
-```
-
-**Linux (Debian/Ubuntu)**
-```bash
-sudo apt install pandoc
-```
-
-**Linux (Fedora)**
-```bash
-sudo dnf install pandoc
-```
-
-**Other platforms**: Download from [pandoc.org/installing](https://pandoc.org/installing.html)
-
-Verify installation:
-
-```bash
-rev --version
-pandoc --version
-```
-
-### Step 3: Configure your name
-
-Set your name for comment replies:
+Configure your name for comment replies:
 
 ```bash
 rev config user "Your Name"
 ```
-
-This is stored locally and used when you reply to reviewer comments.
 
 ## Getting Started
 
@@ -118,7 +103,7 @@ Write your content in the markdown files. When ready to share:
 rev build docx
 ```
 
-This produces `my-report.docx`, a properly formatted Word document with your citations resolved, equations rendered, and cross-references numbered.
+This produces `my-report.docx` with citations resolved, equations rendered, and cross-references numbered. Use `rev build pdf` for PDF output instead.
 
 ### Starting from an Existing Word Document
 
@@ -165,7 +150,7 @@ Send this to reviewers. They add comments and track changes in Word as usual.
 When the reviewed document returns:
 
 ```bash
-rev sections reviewed.docx
+rev sync reviewed.docx
 ```
 
 Your markdown files now contain their feedback as inline annotations.
@@ -245,7 +230,7 @@ rev resolve methods.md -n 1
 Generate both a clean version and one showing comment threads:
 
 ```bash
-rev build --dual
+rev build docx --dual
 ```
 
 Produces:
@@ -337,10 +322,10 @@ The reference `@fig:map` becomes "Figure 1" in output. Numbers update automatica
 |------|---------|
 | Create project | `rev new my-project` |
 | Import Word document | `rev import manuscript.docx` |
-| Build Word | `rev build docx` |
+| Build DOCX | `rev build docx` |
 | Build PDF | `rev build pdf` |
-| Build clean + annotated | `rev build --dual` |
-| Import feedback | `rev sections reviewed.docx` |
+| Build clean + annotated | `rev build docx --dual` |
+| Sync feedback | `rev sync reviewed.docx` |
 | List comments | `rev comments file.md` |
 | Reply to comment | `rev reply file.md -n 1 -m "response"` |
 | Resolve comment | `rev resolve file.md -n 1` |
@@ -365,10 +350,31 @@ rev uninstall-cli-skill    # remove
 
 Once installed, Claude understands docrev commands and can help navigate comments, draft replies, and manage your revision cycle.
 
-## Requirements
+## Installing Dependencies
 
-- Node.js 18+
-- Pandoc 2.11+
+### Pandoc
+
+[Pandoc](https://pandoc.org) handles document conversion.
+
+| Platform | Command |
+|----------|---------|
+| macOS | `brew install pandoc` |
+| Windows | `winget install JohnMacFarlane.Pandoc` |
+| Debian/Ubuntu | `sudo apt install pandoc` |
+| Fedora | `sudo dnf install pandoc` |
+
+Other platforms: [pandoc.org/installing](https://pandoc.org/installing.html)
+
+### LaTeX (for PDF output)
+
+| Platform | Command |
+|----------|---------|
+| macOS | `brew install --cask mactex` |
+| Windows | `winget install MiKTeX.MiKTeX` |
+| Debian/Ubuntu | `sudo apt install texlive-full` |
+| Fedora | `sudo dnf install texlive-scheme-full` |
+
+Alternatively, [TinyTeX](https://yihui.org/tinytex/) provides a minimal distribution that downloads packages on demand.
 
 ## License
 
